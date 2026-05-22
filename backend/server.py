@@ -276,62 +276,38 @@ async def close_current_cycle(user_id: str, mark_reduced: bool = False) -> Optio
     return res["id"] if res else None
 
 
-async def detect_and_create_leave_cycle(user_id: str, new_entry_date: str) -> Optional[dict]:
+async def maybe_close_cycle_on_leave_gap(user_id: str, new_entry_date: str) -> bool:
     """If at least LEAVE_THRESHOLD_DAYS full inactive days separate the previous
-    entry from the incoming entry, close the current open cycle and create an
-    empty 'leave-period' cycle covering the entire absence. Returns the leave
-    cycle if created, else None.
+    entry from the incoming entry, close the current open work cycle so the new
+    entry starts a fresh one. Returns True if a cycle was closed.
+
+    The leave-period cycle itself is NOT created here — `reconcile_leave_cycles`
+    is the sole canonical writer for leave cycles and runs after every write.
 
     Skipped entirely if the new entry is being back-dated (i.e. any existing
-    entry has a later date) — leave detection must only fire on chronological
-    additions."""
+    entry has a later date) — work-cycle splits must only happen on
+    chronological additions; reconcile will still surface a leave cycle if
+    backdating produces a qualifying gap."""
     later = await db.entries.find_one(
         {"user_id": user_id, "date": {"$gt": new_entry_date}}, {"_id": 0}
     )
     if later:
-        return None
+        return False
     prev = await db.entries.find_one(
         {"user_id": user_id, "date": {"$lt": new_entry_date}},
         {"_id": 0}, sort=[("date", -1)]
     )
     if not prev:
-        return None
+        return False
     py, pm, pd = [int(x) for x in prev["date"].split("-")]
     ny, nm, nd = [int(x) for x in new_entry_date.split("-")]
     prev_d = date_cls(py, pm, pd)
     new_d = date_cls(ny, nm, nd)
-    gap_days = (new_d - prev_d).days - 1  # full inactive days between the two
+    gap_days = (new_d - prev_d).days - 1
     if gap_days < LEAVE_THRESHOLD_DAYS:
-        return None
-    # Close the work cycle that prev belongs to (if still open).
+        return False
     await close_current_cycle(user_id, mark_reduced=False)
-    leave_start = (prev_d + timedelta(days=1)).isoformat()
-    leave_end = (new_d - timedelta(days=1)).isoformat()
-    now_iso = datetime.now(timezone.utc).isoformat()
-    leave_cyc = {
-        "id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "started_at": leave_start + "T00:00:00+00:00",
-        # ended_at uses now_iso so the leave cycle sorts AFTER the work cycle
-        # just closed above — making it the "most recent closed" reference.
-        "ended_at": now_iso,
-        "is_leave_period": True,
-        "leave_days": gap_days,
-        "leave_start_date": leave_start,
-        "leave_end_date": leave_end,
-        "is_reduced_weekly_rest": False,
-        "reduced_rest_used": 0,
-        "extensions_used": 0,
-        "break_violations_count": 0,
-        "total_driving_minutes": 0,
-        "total_working_minutes": 0,
-        "total_rest_minutes": 0,
-        "days_worked": 0,
-        "decoucher_count": 0,
-    }
-    await db.cycles.insert_one(dict(leave_cyc))
-    leave_cyc.pop("_id", None)
-    return leave_cyc
+    return True
 
 
 async def reconcile_leave_cycles(user_id: str):
@@ -537,9 +513,10 @@ async def create_entry(payload: DailyEntryIn, user: dict = Depends(get_current_u
         prev_end = end_dt(prev)
         new_start = to_dt(payload.date, payload.start_time)
         daily_rest = max(int((new_start - prev_end).total_seconds() // 60), 0)
-    # If a long absence preceded this entry, close the previous cycle and stamp
-    # an empty leave-period cycle covering it before opening the new one.
-    await detect_and_create_leave_cycle(user["id"], payload.date)
+    # If a long absence preceded this entry, close the previous cycle so the
+    # new entry starts a fresh one. The leave-period cycle itself is created by
+    # reconcile_leave_cycles at the end of this call.
+    await maybe_close_cycle_on_leave_gap(user["id"], payload.date)
     cyc = await get_or_create_cycle_for_entry(user["id"])
     now = datetime.now(timezone.utc).isoformat()
     doc = payload.model_dump()

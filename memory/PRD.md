@@ -67,21 +67,26 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
 - **Dashboard tolerates `cycle=null`**: ComplianceBar renders an "Aucun cycle
   actif" empty state when no cycle is open; PreviousCycleCard is only shown
   when both cycle + previous_cycle are present.
-- **NEW Leave-period cycle rule**: when a new entry is added and ≥6 full
-  inactive days separate it from the previous entry, the system:
-  1. Closes the current open work cycle.
-  2. Inserts an empty `is_leave_period: true` cycle covering the entire
-     absence (leave_start_date, leave_end_date, leave_days).
-  3. Opens a fresh new cycle for the new entry.
-- Leave detection is **skipped on back-dating** (entries existing after the
-  new date inhibit the rule).
-- Dashboard exposes `leave_period` (most recent leave cycle between previous
-  work cycle and current cycle) and `previous_cycle` now filters out leave
-  cycles to always compare against the last real work cycle.
-- Frontend: `LeavePeriodBanner` shown above PreviousCycleCard when a leave
-  period exists.
-- Tests: `/app/backend/tests/test_leave_cycle.py` (16 passing) covers the
-  full contract including boundary gap_days=5 vs 6.
+- **Leave-period cycles** are now a **pure projection** of inactivity gaps in
+  the entry timeline:
+  - `reconcile_leave_cycles(user_id)` runs after every entry create/update/
+    delete. It deletes any leave cycle whose covered range no longer matches a
+    current gap and creates new ones for any gap ≥ `LEAVE_THRESHOLD_DAYS = 6`.
+  - `maybe_close_cycle_on_leave_gap` (called inside `create_entry`) closes the
+    open work cycle when a chronological add lands ≥ 6 days after the previous
+    entry, so the new entry starts a fresh work cycle.
+- Dashboard `previous_cycle` no longer filters out leave cycles — when a leave
+  cycle is the most recently closed, it surfaces as the comparison reference
+  with **0h00** totals (acting as a reset point). The dict carries
+  `is_leave_period`, `leave_start_date`, `leave_end_date`, `leave_days` so the
+  frontend can label and date it correctly.
+- Frontend: `LeavePeriodBanner` (orange info card) is rendered when
+  `data.leave_period` is present; `PreviousCycleCard` swaps the date range and
+  badge when `prev.is_leave_period`.
+- Tests: `/app/backend/tests/test_leave_cycle.py` + `test_leave_reconciliation.py`
+  (29 passing) cover the full contract including bidirectional reconciliation
+  on create/update/delete, boundaries (gap 5 vs 6), stress sequences and
+  work-cycle invariants.
 
 ## Next Tasks
 - (P1) PWA support (manifest + service worker).
