@@ -134,12 +134,13 @@ def end_dt(entry: dict) -> datetime:
     return end
 
 
-def compute_break_rule(driving_segments, rest_breaks, double_equipage=False):
+def compute_break_rule(driving_segments, rest_breaks):
     """
     EU regulation 561/2006: after 4h30 of accumulated driving the driver must take a
-    break of >=45min, which may be split as 15+30 in this order.
-    Co-driver exception (double_equipage=True): a single break of >=30min qualifies
-    to reset the accumulator (the 45min threshold drops to 30min).
+    break of >=45min, which may be split as 15+30 in this order. This rule applies
+    in both solo and co-driver mode — the 45min relay with the other driver is what
+    resets a fresh 4h30 driving block. (The 30min labour-law break is a separate
+    obligation and is NOT used to reset the 4h30 driving counter.)
     We assume segments and breaks are interleaved chronologically:
     drive[0], break[0], drive[1], break[1], ...
     Returns dict with max_consecutive_driving_minutes and break_rule_status.
@@ -148,7 +149,6 @@ def compute_break_rule(driving_segments, rest_breaks, double_equipage=False):
     acc_break = 0
     has_30_in_window = False
     max_acc = 0
-    qualifying_threshold = MIN_SECOND_SPLIT_BREAK if double_equipage else MIN_QUALIFYING_BREAK
     for i, seg in enumerate(driving_segments):
         acc_drive += int(seg)
         max_acc = max(max_acc, acc_drive)
@@ -157,7 +157,7 @@ def compute_break_rule(driving_segments, rest_breaks, double_equipage=False):
             acc_break += b
             if b >= MIN_SECOND_SPLIT_BREAK:
                 has_30_in_window = True
-            if acc_break >= qualifying_threshold and has_30_in_window:
+            if acc_break >= MIN_QUALIFYING_BREAK and has_30_in_window:
                 acc_drive = 0
                 acc_break = 0
                 has_30_in_window = False
@@ -187,12 +187,9 @@ def enrich_entry(doc: dict) -> dict:
     # extension flag
     doc["is_driving_extension"] = DAILY_DRIVING_EXTENSION_MIN < driving <= DAILY_DRIVING_EXTENSION_MAX
     doc["is_legacy"] = doc.get("cycle_id") is None
-    # 4h30 / 45min break rule (relaxed to 30min threshold for double équipage)
-    br = compute_break_rule(
-        doc.get("driving_segments", []),
-        doc.get("rest_breaks", []),
-        double_equipage=bool(doc.get("double_equipage", False)),
-    )
+    # 4h30 / 45min break rule. double_equipage is stored for traceability but does
+    # NOT alter the 4h30 driving validation (45min relay required in both modes).
+    br = compute_break_rule(doc.get("driving_segments", []), doc.get("rest_breaks", []))
     doc.update(br)
     return doc
 

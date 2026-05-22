@@ -25,9 +25,8 @@ function amplitudeMinutes(start, end) {
   return e - s;
 }
 
-function computeBreakRule(drivingMins, restMins, doubleEquipage = false) {
+function computeBreakRule(drivingMins, restMins) {
   let accDrive = 0, accBreak = 0, hasHalf = false, maxAcc = 0;
-  const threshold = doubleEquipage ? 30 : 45;
   for (let i = 0; i < drivingMins.length; i++) {
     accDrive += drivingMins[i] || 0;
     if (accDrive > maxAcc) maxAcc = accDrive;
@@ -35,7 +34,7 @@ function computeBreakRule(drivingMins, restMins, doubleEquipage = false) {
       const b = restMins[i] || 0;
       accBreak += b;
       if (b >= 30) hasHalf = true;
-      if (accBreak >= threshold && hasHalf) {
+      if (accBreak >= 45 && hasHalf) {
         accDrive = 0; accBreak = 0; hasHalf = false;
       }
     }
@@ -83,9 +82,9 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
     const worked = Math.max(amp - rest, 0);
     const isExtension = driving > 9 * 60 && driving <= 10 * 60;
     const isOverDriving = driving > 10 * 60;
-    const breakRule = computeBreakRule(drivingArr, restArr, doubleEquipage);
+    const breakRule = computeBreakRule(drivingArr, restArr);
     return { driving, rest, amp, worked, isExtension, isOverDriving, breakRule };
-  }, [drivingInputs, restInputs, startTime, endTime, doubleEquipage]);
+  }, [drivingInputs, restInputs, startTime, endTime]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -101,7 +100,7 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="px-4 py-5 space-y-5" data-testid="entry-form">
+    <form onSubmit={handleSubmit} className="px-4 py-5 pb-24 space-y-5" data-testid="entry-form">
       {/* Live calculation banner */}
       <div className="rf-card-elevated p-4 grid grid-cols-2 gap-3 sticky top-0 z-10 animate-fade-in-up" data-testid="live-totals">
         <LiveStat icon={Clock} label="Amplitude" value={minutesToHM(totals.amp)} testid="live-amplitude" />
@@ -195,8 +194,10 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
       </Section>
 
       <Section title="Double équipage" testid="section-double-equipage">
-        <p className="text-xs text-rf-muted mb-3">
-          En double équipage, une pause ≥ 30 min suffit à valider la règle 4h30.
+        <p className="text-xs text-rf-muted mb-3 leading-relaxed">
+          En double équipage, une période de relais de 45 minutes avec l'autre conducteur permet
+          de reprendre un nouveau cycle de conduite de 4h30. Le temps de travail reste soumis
+          aux règles du Code du travail, notamment la pause obligatoire de 30 minutes.
         </p>
         <div className="grid grid-cols-2 gap-2">
           <Toggle testid="double-equipage-yes" active={doubleEquipage} onClick={() => setDoubleEquipage(true)} label="Oui" color="rf-blue" />

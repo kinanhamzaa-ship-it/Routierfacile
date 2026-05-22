@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import api from "../lib/api";
 import { minutesToHM, formatDateFR, weekdayFR } from "../lib/time";
-import { MagnifyingGlass, Bed, ForkKnife, Warning, Archive } from "@phosphor-icons/react";
+import { MagnifyingGlass, Bed, ForkKnife, Warning, Archive, UsersThree } from "@phosphor-icons/react";
 
 const REST_LABEL = {
   ok: { text: "Repos OK", color: "rf-green" },
@@ -114,7 +114,7 @@ export default function History() {
                 )}
                 {e.double_equipage && (
                   <span className="flex items-center gap-1 text-rf-blue" data-testid={`co-driver-${e.id}`}>
-                    <Warning size={12} /> Double équipage
+                    <UsersThree size={12} /> Double équipage
                   </span>
                 )}
                 {e.decoucher && (
