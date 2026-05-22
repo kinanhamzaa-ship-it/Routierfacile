@@ -102,6 +102,11 @@ export default function History() {
               </div>
 
               <div className="flex items-center flex-wrap gap-3 mt-2 text-[11px] text-rf-muted">
+                {e.break_rule_status === "violation" && (
+                  <span className="flex items-center gap-1 text-rf-red" data-testid={`break-violation-${e.id}`}>
+                    <Warning size={12} /> Pause 4h30/45min
+                  </span>
+                )}
                 {e.is_driving_extension && (
                   <span className="flex items-center gap-1 text-rf-orange" data-testid={`ext-${e.id}`}>
                     <Warning size={12} /> Extension 10h

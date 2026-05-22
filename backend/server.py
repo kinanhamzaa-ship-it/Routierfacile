@@ -33,6 +33,9 @@ WEEKLY_REST_FULL = 45 * 60  # >= 45h => weekly rest
 WEEKLY_REST_MIN = 24 * 60   # 24-45h => reduced weekly rest candidate
 DAILY_REST_OK = 11 * 60
 DAILY_REST_REDUCED = 9 * 60
+MAX_CONSECUTIVE_DRIVING = 4 * 60 + 30  # 4h30 before mandatory break
+MIN_QUALIFYING_BREAK = 45  # minutes total to reset driving counter
+MIN_SECOND_SPLIT_BREAK = 30  # at least one break of 30+ min within split
 
 
 def get_jwt_secret() -> str:
@@ -84,9 +87,9 @@ MealStatus = Literal["yes", "no", "unsure"]
 
 
 class DailyEntryIn(BaseModel):
-    date: str
-    start_time: str
-    end_time: str
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    start_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+    end_time: str = Field(pattern=r"^\d{2}:\d{2}$")
     driving_segments: List[int] = Field(default_factory=list)
     rest_breaks: List[int] = Field(default_factory=list)
     departure: Optional[str] = ""
@@ -97,8 +100,8 @@ class DailyEntryIn(BaseModel):
 
 
 class DetectIn(BaseModel):
-    date: str
-    start_time: str
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    start_time: str = Field(pattern=r"^\d{2}:\d{2}$")
 
 
 # ============================================================
@@ -131,6 +134,35 @@ def end_dt(entry: dict) -> datetime:
     return end
 
 
+def compute_break_rule(driving_segments, rest_breaks):
+    """
+    EU regulation 561/2006: after 4h30 of accumulated driving the driver must take a
+    break of >=45min, which may be split as 15+30 in this order.
+    We assume segments and breaks are interleaved chronologically:
+    drive[0], break[0], drive[1], break[1], ...
+    Returns dict with max_consecutive_driving_minutes and break_rule_status.
+    """
+    acc_drive = 0
+    acc_break = 0
+    has_30_in_window = False
+    max_acc = 0
+    for i, seg in enumerate(driving_segments):
+        acc_drive += int(seg)
+        max_acc = max(max_acc, acc_drive)
+        if i < len(rest_breaks):
+            b = int(rest_breaks[i])
+            acc_break += b
+            if b >= MIN_SECOND_SPLIT_BREAK:
+                has_30_in_window = True
+            # Reset only if total >=45 AND one break >=30 in the same window
+            if acc_break >= MIN_QUALIFYING_BREAK and has_30_in_window:
+                acc_drive = 0
+                acc_break = 0
+                has_30_in_window = False
+    status = "violation" if max_acc > MAX_CONSECUTIVE_DRIVING else "ok"
+    return {"max_consecutive_driving_minutes": max_acc, "break_rule_status": status}
+
+
 def enrich_entry(doc: dict) -> dict:
     driving = sum(int(x) for x in doc.get("driving_segments", []))
     rest = sum(int(x) for x in doc.get("rest_breaks", []))
@@ -153,6 +185,9 @@ def enrich_entry(doc: dict) -> dict:
     # extension flag
     doc["is_driving_extension"] = DAILY_DRIVING_EXTENSION_MIN < driving <= DAILY_DRIVING_EXTENSION_MAX
     doc["is_legacy"] = doc.get("cycle_id") is None
+    # 4h30 / 45min break rule
+    br = compute_break_rule(doc.get("driving_segments", []), doc.get("rest_breaks", []))
+    doc.update(br)
     return doc
 
 
@@ -220,20 +255,27 @@ async def close_current_cycle_and_open_new(user_id: str, is_reduced: bool = Fals
 
 
 async def recompute_cycle_counters(cycle_id: str):
-    """Recompute reduced_rest_used and extensions_used from all entries in cycle."""
+    """Recompute reduced_rest_used, extensions_used and break_violations_count from all entries in cycle."""
     cursor = db.entries.find({"cycle_id": cycle_id}, {"_id": 0})
     entries = await cursor.to_list(length=200)
     reduced = 0
     ext = 0
+    violations = 0
     for e in entries:
         enrich_entry(e)
         if e.get("daily_rest_status") == "reduced":
             reduced += 1
         if e.get("is_driving_extension"):
             ext += 1
+        if e.get("break_rule_status") == "violation":
+            violations += 1
     await db.cycles.update_one(
         {"id": cycle_id},
-        {"$set": {"reduced_rest_used": reduced, "extensions_used": ext}}
+        {"$set": {
+            "reduced_rest_used": reduced,
+            "extensions_used": ext,
+            "break_violations_count": violations,
+        }}
     )
 
 
@@ -476,6 +518,7 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
             "reduced_rest_max": 3,
             "extensions_used": cyc.get("extensions_used", 0),
             "extensions_max": 2,
+            "break_violations_count": cyc.get("break_violations_count", 0),
         },
         "today": today_entry,
         "last_entry": last_entry,

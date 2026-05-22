@@ -44,13 +44,14 @@ export function exportMonthlyPdf({ year, month, summary, driverName }) {
     minutesToHM(e.total_driving_minutes),
     minutesToHM(e.total_rest_minutes),
     e.daily_rest_minutes != null ? minutesToHM(e.daily_rest_minutes) : "N/A",
+    e.break_rule_status === "violation" ? "⚠" : "OK",
     `${e.departure || ""}\n→ ${e.arrival || ""}`,
     e.decoucher ? "Oui" : "Non",
     e.meal_status === "yes" ? "Oui" : e.meal_status === "no" ? "Non" : "Pas sûr",
   ]);
 
   autoTable(doc, {
-    head: [["Date", "Horaires", "Amplitude", "Travail", "Conduite", "Pauses", "Repos prec.", "Trajet", "Découcher", "Repas"]],
+    head: [["Date", "Horaires", "Amplitude", "Travail", "Conduite", "Pauses", "Repos prec.", "4h30", "Trajet", "Découcher", "Repas"]],
     body: rows,
     theme: "striped",
     headStyles: { fillColor: [0, 122, 255], textColor: 255 },

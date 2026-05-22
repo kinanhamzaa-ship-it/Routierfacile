@@ -97,7 +97,14 @@ export default function Dashboard() {
               <button key={e.id} onClick={() => nav(`/edit/${e.id}`)} data-testid={`recent-${e.id}`} className="w-full text-left rf-tile">
                 <div className="flex items-start justify-between">
                   <div>
-                    <div className="rf-label capitalize">{weekdayFR(e.date)}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="rf-label capitalize">{weekdayFR(e.date)}</div>
+                      {e.is_legacy && (
+                        <span className="rf-label text-rf-muted bg-rf-elevated px-1.5 py-0.5 rounded">
+                          Archive
+                        </span>
+                      )}
+                    </div>
                     <div className="font-display text-xl mt-0.5">{formatDateFR(e.date)}</div>
                     <div className="text-[11px] text-rf-muted mt-1">
                       Amplitude {minutesToHM(e.amplitude_minutes)} · Travail {minutesToHM(e.total_working_minutes)}

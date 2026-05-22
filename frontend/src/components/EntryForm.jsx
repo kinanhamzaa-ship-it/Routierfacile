@@ -25,6 +25,23 @@ function amplitudeMinutes(start, end) {
   return e - s;
 }
 
+function computeBreakRule(drivingMins, restMins) {
+  let accDrive = 0, accBreak = 0, hasHalf = false, maxAcc = 0;
+  for (let i = 0; i < drivingMins.length; i++) {
+    accDrive += drivingMins[i] || 0;
+    if (accDrive > maxAcc) maxAcc = accDrive;
+    if (i < restMins.length) {
+      const b = restMins[i] || 0;
+      accBreak += b;
+      if (b >= 30) hasHalf = true;
+      if (accBreak >= 45 && hasHalf) {
+        accDrive = 0; accBreak = 0; hasHalf = false;
+      }
+    }
+  }
+  return { maxConsecutive: maxAcc, violation: maxAcc > 4 * 60 + 30 };
+}
+
 export default function EntryForm({ initial, onSubmit, submitting }) {
   const [date, setDate] = useState(initial?.date || todayIso());
   const [startTime, setStartTime] = useState(initial?.start_time || "06:00");
@@ -52,13 +69,16 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
   const removeItem = (arr, setArr, idx) => setArr(arr.filter((_, i) => i !== idx));
 
   const totals = useMemo(() => {
-    const driving = drivingInputs.map(parseHmToMinutes).reduce((s, x) => s + x, 0);
-    const rest = restInputs.map(parseHmToMinutes).reduce((s, x) => s + x, 0);
+    const drivingArr = drivingInputs.map(parseHmToMinutes);
+    const restArr = restInputs.map(parseHmToMinutes);
+    const driving = drivingArr.reduce((s, x) => s + x, 0);
+    const rest = restArr.reduce((s, x) => s + x, 0);
     const amp = amplitudeMinutes(startTime, endTime);
     const worked = Math.max(amp - rest, 0);
     const isExtension = driving > 9 * 60 && driving <= 10 * 60;
     const isOverDriving = driving > 10 * 60;
-    return { driving, rest, amp, worked, isExtension, isOverDriving };
+    const breakRule = computeBreakRule(drivingArr, restArr);
+    return { driving, rest, amp, worked, isExtension, isOverDriving, breakRule };
   }, [drivingInputs, restInputs, startTime, endTime]);
 
   const handleSubmit = (e) => {
@@ -89,6 +109,17 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
         {totals.isOverDriving && (
           <div className="col-span-2 text-xs text-rf-red flex items-center gap-2" data-testid="overdriving-warning">
             <span className="rf-status-dot bg-rf-red" /> Conduite &gt; 10h : limite quotidienne dépassée
+          </div>
+        )}
+        {totals.breakRule.violation && (
+          <div className="col-span-2 text-xs text-rf-red flex items-center gap-2" data-testid="breakrule-warning">
+            <span className="rf-status-dot bg-rf-red" /> Règle 4h30 / 45 min non respectée
+            ({minutesToHM(totals.breakRule.maxConsecutive)} sans pause qualifiante)
+          </div>
+        )}
+        {!totals.breakRule.violation && totals.driving > 0 && (
+          <div className="col-span-2 text-xs text-rf-green flex items-center gap-2" data-testid="breakrule-ok">
+            <span className="rf-status-dot bg-rf-green" /> Règle 4h30 / 45 min respectée
           </div>
         )}
       </div>

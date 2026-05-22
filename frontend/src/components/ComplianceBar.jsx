@@ -36,7 +36,7 @@ export default function ComplianceBar({ data }) {
           <div data-testid="weekly-progress" className={`h-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
         </div>
 
-        <div className="mt-3 grid grid-cols-3 gap-2">
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <DailyRestTile status={dailyRestStatus} minutes={last_entry?.daily_rest_minutes} />
           <CounterTile
             label="Repos réduits"
@@ -49,6 +49,10 @@ export default function ComplianceBar({ data }) {
             value={cycle.extensions_used}
             max={cycle.extensions_max}
             testid="indicator-extensions"
+          />
+          <BreakViolationsTile
+            count={cycle.break_violations_count || 0}
+            testid="indicator-break-violations"
           />
         </div>
       </div>
@@ -81,6 +85,18 @@ function CounterTile({ label, value, max, testid }) {
     <div className="rf-tile py-2 px-3" data-testid={testid}>
       <div className="rf-label">{label}</div>
       <div className={`font-display text-base mt-0.5 text-${color}`}>{value} / {max}</div>
+    </div>
+  );
+}
+
+function BreakViolationsTile({ count, testid }) {
+  const color = count === 0 ? "rf-green" : "rf-red";
+  return (
+    <div className="rf-tile py-2 px-3" data-testid={testid}>
+      <div className="rf-label">Pauses 4h30</div>
+      <div className={`font-display text-base mt-0.5 text-${color}`}>
+        {count === 0 ? "OK" : `${count} alerte${count > 1 ? "s" : ""}`}
+      </div>
     </div>
   );
 }
