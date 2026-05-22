@@ -1,0 +1,83 @@
+{
+  "theme": "dark",
+  "archetype": "2 (The Performance Pro)",
+  "rationale": "Designed for truck drivers in Europe, 'Routier Facile' acts as a tactile, high-visibility command center. Dark mode reduces cabin glare during night driving, while high contrast tactical minimalism ensures critical compliance data (driving hours, breaks) is readable instantly on the road.",
+  "colors": {
+    "background": "#0A0A0A",
+    "surface": "#141414",
+    "surface_elevated": "#1F1F1F",
+    "text_primary": "#FFFFFF",
+    "text_secondary": "#A1A1AA",
+    "accent_primary": "#007AFF",
+    "compliance": {
+      "green": "#34C759",
+      "orange": "#FF9500",
+      "red": "#FF3B30"
+    },
+    "border": "#27272A"
+  },
+  "typography": {
+    "heading_font": "Barlow Condensed",
+    "body_font": "Inter",
+    "rules": [
+      "Use tracking-tight for all large headings.",
+      "Uppercase and tracking-[0.2em] for small labels (e.g. status).",
+      "Keep text large and legible. Minimum tap targets must be 44px high."
+    ]
+  },
+  "spacing_and_layout": {
+    "philosophy": "Mobile-first, dense but readable. Prioritize scanability of the compliance dashboard.",
+    "grid_system": "Mode B: The 'Control Room' Grid.",
+    "rules": [
+      "Use generous padding p-4 to p-6 inside cards to separate data.",
+      "Optical alignment is critical. Ensure text aligns properly with icons.",
+      "Compliance Dashboard MUST be sticky (either top or bottom) so it's always visible."
+    ]
+  },
+  "components": {
+    "cards": "Flat background with 1px border (border-border), no shadows (tactical look). Slightly rounded corners (rounded-md).",
+    "buttons": "High contrast, solid colors. Active states use compliance colors where applicable.",
+    "inputs": "Shadcn UI customized with dark backgrounds and high contrast text.",
+    "charts_and_progress": "Use thick, highly visible progress bars for tracking driving hours (max 56h/week). Apply compliance colors dynamically based on proximity to the limit."
+  },
+  "motion_and_interactions": {
+    "rules": [
+      "Keep animations minimal and snappy to maintain a high-performance feel.",
+      "Use instant color changes on tap/active states for clear feedback."
+    ]
+  },
+  "media": {
+    "images": [
+      {
+        "category": "auth_background",
+        "url": "https://images.unsplash.com/photo-1485575301924-6891ef935dcd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODl8MHwxfHNlYXJjaHwxfHx0cnVjayUyMGRyaXZlciUyMGhpZ2h3YXklMjBuaWdodHxlbnwwfHx8fDE3Nzk0Mjg2MDJ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Trailer truck passing on road near rail guard at night."
+      },
+      {
+        "category": "empty_state_history",
+        "url": "https://images.pexels.com/photos/11053641/pexels-photo-11053641.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Heavy-duty truck navigating quiet road at dusk."
+      }
+    ],
+    "icons": {
+      "library": "@phosphor-icons/react",
+      "installation": "yarn add @phosphor-icons/react"
+    }
+  },
+  "accessibility": {
+    "rules": [
+      "All interactive elements MUST include a 'data-testid' attribute (e.g. data-testid='submit-daily-log').",
+      "Contrast ratio must be minimum 4.5:1 against backgrounds.",
+      "The entire UI, labels, and placeholders MUST be in French."
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Install @phosphor-icons/react for dense dashboard icons.",
+    "Update tailwind.config.js to include 'Barlow Condensed' for headings and 'Inter' for body.",
+    "Force dark mode by default by adding 'dark' class to the root or body, and customize Shadcn CSS variables for high contrast.",
+    "Build a sticky Compliance Dashboard component that stays visible across the application.",
+    "Implement the Daily Work Entry Form with clear segment separation (driving, rest, découcher, meal status).",
+    "Dynamically apply the Green/Orange/Red compliance colors to progress bars based on the 56h weekly limit.",
+    "Ensure the PDF export feature formats data clearly for roadside inspections."
+  ]
+}
