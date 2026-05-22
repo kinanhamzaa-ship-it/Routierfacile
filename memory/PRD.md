@@ -67,6 +67,47 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
 - **Dashboard tolerates `cycle=null`**: ComplianceBar renders an "Aucun cycle
   actif" empty state when no cycle is open; PreviousCycleCard is only shown
   when both cycle + previous_cycle are present.
+- **Leave-period cycles** are a **pure projection** of inactivity gaps in
+  the entry timeline. `reconcile_leave_cycles(user_id)` runs after every
+  entry create/update/delete: deletes leave cycles whose covered range no
+  longer matches a current gap and creates new ones for any gap ≥ 6 days.
+- `maybe_close_cycle_on_leave_gap` (called inside `create_entry`) closes the
+  open work cycle when a chronological add lands ≥ 6 days after the previous
+  entry, so the new entry starts a fresh work cycle.
+- Dashboard `previous_cycle` no longer filters out leave cycles — when a
+  leave cycle is the most recently closed, it surfaces as the comparison
+  reference with **0h00** totals (acting as a reset point). The dict carries
+  `is_leave_period`, `leave_start_date`, `leave_end_date`, `leave_days`.
+- Frontend: `LeavePeriodBanner` (orange info card) and `PreviousCycleCard`
+  badges the leave period and swaps the date range.
+
+## Update v4 (2026-02, Hard cap: 6 working days per cycle)
+- **Hard constraint**: a non-leave cycle MUST contain at most 6 working-day
+  entries. The 7th `POST /api/entries` against the same open cycle is
+  **rejected with HTTP 400** and a structured detail body:
+  `{code: "cycle_max_days_reached", message: "<fr>", max_days: 6}`.
+- No auto-split, no implicit cycle creation. The driver must explicitly
+  invoke `/api/cycles/start-new` (or `/api/cycles/confirm-reduced`) and then
+  retry — preserving the EU regulatory intent of a deliberate weekly rest.
+- The leave-gap path (≥ 6 inactive days) closes the current cycle BEFORE the
+  cap check, so a long-absence return naturally lands in a fresh cycle.
+- `PUT` and `DELETE` are not affected — they never increase entry count.
+- Dashboard surfaces the cap via `cycle.days_worked_max = 6`. Frontend
+  ComplianceBar now displays `Jours · X / 6` (turns orange at the cap).
+- Frontend `NewEntry` shows a "Limite du cycle atteinte" modal with a
+  one-click "Démarrer un nouveau cycle" button that runs `start-new` and
+  retries the entry automatically.
+- Tests: `/app/backend/tests/test_cycle_max_days_cap.py` (12 PASS) — cap,
+  manual recovery, leave bypass, gap=5 still blocks, PUT/DELETE unaffected,
+  repeated 400s idempotent. 41/41 cycle tests pass overall (no regression).
+- **No empty cycles** policy enforced: a cycle is created lazily only when a
+  new entry is added, and deleted as soon as its last entry is removed.
+- **Auto-revert** on last-entry delete: the most recent closed WORK cycle is
+  reopened (`ended_at=null`, `is_reduced_weekly_rest=false`). Leave cycles are
+  skipped when reverting.
+- **Dashboard tolerates `cycle=null`**: ComplianceBar renders an "Aucun cycle
+  actif" empty state when no cycle is open; PreviousCycleCard is only shown
+  when both cycle + previous_cycle are present.
 - **Leave-period cycles** are now a **pure projection** of inactivity gaps in
   the entry timeline:
   - `reconcile_leave_cycles(user_id)` runs after every entry create/update/
