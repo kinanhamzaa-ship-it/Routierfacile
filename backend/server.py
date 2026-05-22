@@ -231,9 +231,17 @@ async def get_current_user(request: Request) -> dict:
 
 # ============================================================
 # Cycle helpers
-async def get_current_cycle(user_id: str) -> dict:
-    """Return current open cycle, creating one if none."""
-    cyc = await db.cycles.find_one({"user_id": user_id, "ended_at": None}, {"_id": 0})
+async def get_current_cycle(user_id: str) -> Optional[dict]:
+    """Read-only: return the current OPEN cycle or None. Never creates."""
+    return await db.cycles.find_one(
+        {"user_id": user_id, "ended_at": None}, {"_id": 0}
+    )
+
+
+async def get_or_create_cycle_for_entry(user_id: str) -> dict:
+    """Used ONLY by create_entry: return current open cycle, creating one if
+    none exists (an empty cycle must never appear without a same-call entry)."""
+    cyc = await get_current_cycle(user_id)
     if cyc:
         return cyc
     new_cyc = {
@@ -243,29 +251,28 @@ async def get_current_cycle(user_id: str) -> dict:
         "ended_at": None,
         "reduced_rest_used": 0,
         "extensions_used": 0,
-        "is_reduced_weekly_rest": False,
+        "break_violations_count": 0,
+        "is_reduced_weekly_rest": False,  # set on the cycle that ENDS with a reduced rest
     }
     await db.cycles.insert_one(dict(new_cyc))
     return new_cyc
 
 
-async def close_current_cycle_and_open_new(user_id: str, is_reduced: bool = False) -> dict:
+async def close_current_cycle(user_id: str, mark_reduced: bool = False) -> Optional[str]:
+    """Close the current open cycle (sets ended_at) and optionally flag it as
+    ending with a reduced weekly rest. Returns the closed cycle id, or None if
+    no open cycle existed. Does NOT create a new cycle — that happens lazily on
+    the next create_entry call."""
     now = datetime.now(timezone.utc).isoformat()
-    await db.cycles.update_one(
+    update = {"ended_at": now}
+    if mark_reduced:
+        update["is_reduced_weekly_rest"] = True
+    res = await db.cycles.find_one_and_update(
         {"user_id": user_id, "ended_at": None},
-        {"$set": {"ended_at": now}}
+        {"$set": update},
+        return_document=False,  # return doc before update; we just need its id
     )
-    new_cyc = {
-        "id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "started_at": now,
-        "ended_at": None,
-        "reduced_rest_used": 0,
-        "extensions_used": 0,
-        "is_reduced_weekly_rest": is_reduced,
-    }
-    await db.cycles.insert_one(dict(new_cyc))
-    return new_cyc
+    return res["id"] if res else None
 
 
 async def recompute_cycle_counters(cycle_id: str):
@@ -377,19 +384,19 @@ async def detect_rest(payload: DetectIn, user: dict = Depends(get_current_user))
 @api_router.get("/cycles/current")
 async def current_cycle(user: dict = Depends(get_current_user)):
     cyc = await get_current_cycle(user["id"])
-    return cyc
+    return cyc  # may be None
 
 
 @api_router.post("/cycles/start-new")
 async def start_new_cycle(user: dict = Depends(get_current_user)):
-    cyc = await close_current_cycle_and_open_new(user["id"], is_reduced=False)
-    return cyc
+    closed_id = await close_current_cycle(user["id"], mark_reduced=False)
+    return {"closed_cycle_id": closed_id}
 
 
 @api_router.post("/cycles/confirm-reduced")
 async def confirm_reduced(user: dict = Depends(get_current_user)):
-    cyc = await close_current_cycle_and_open_new(user["id"], is_reduced=True)
-    return cyc
+    closed_id = await close_current_cycle(user["id"], mark_reduced=True)
+    return {"closed_cycle_id": closed_id}
 
 
 # ============================================================
@@ -408,7 +415,7 @@ async def create_entry(payload: DailyEntryIn, user: dict = Depends(get_current_u
         prev_end = end_dt(prev)
         new_start = to_dt(payload.date, payload.start_time)
         daily_rest = max(int((new_start - prev_end).total_seconds() // 60), 0)
-    cyc = await get_current_cycle(user["id"])
+    cyc = await get_or_create_cycle_for_entry(user["id"])
     now = datetime.now(timezone.utc).isoformat()
     doc = payload.model_dump()
     doc.update({
@@ -483,19 +490,17 @@ async def delete_entry(entry_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Entrée introuvable")
     await db.entries.delete_one({"id": entry_id, "user_id": user["id"]})
     reverted_to_cycle = None
+    deleted_empty_cycle = False
     cycle_id = existing.get("cycle_id")
     if cycle_id:
         await recompute_cycle_counters(cycle_id)
-        # If the deleted entry belonged to the CURRENT open cycle and that cycle
-        # is now empty, automatically revert to the previously closed cycle
-        # (re-open it) so the driver continues from where they were before
-        # starting a new cycle.
         cyc = await db.cycles.find_one({"id": cycle_id})
         if cyc and cyc.get("ended_at") is None:
             remaining = await db.entries.count_documents(
                 {"user_id": user["id"], "cycle_id": cycle_id}
             )
             if remaining == 0:
+                # Empty cycles are never allowed: always delete.
                 prev = await db.cycles.find_one(
                     {
                         "user_id": user["id"],
@@ -504,15 +509,22 @@ async def delete_entry(entry_id: str, user: dict = Depends(get_current_user)):
                     },
                     sort=[("ended_at", -1)],
                 )
+                await db.cycles.delete_one({"id": cycle_id})
+                deleted_empty_cycle = True
+                # If there's a previous closed cycle, reopen it so the driver
+                # continues from where they were.
                 if prev:
-                    await db.cycles.delete_one({"id": cycle_id})
                     await db.cycles.update_one(
                         {"id": prev["id"]},
-                        {"$set": {"ended_at": None}},
+                        {"$set": {"ended_at": None, "is_reduced_weekly_rest": False}},
                     )
                     await recompute_cycle_counters(prev["id"])
                     reverted_to_cycle = prev["id"]
-    return {"ok": True, "reverted_to_cycle": reverted_to_cycle}
+    return {
+        "ok": True,
+        "reverted_to_cycle": reverted_to_cycle,
+        "deleted_empty_cycle": deleted_empty_cycle,
+    }
 
 
 # ============================================================
@@ -520,8 +532,11 @@ async def delete_entry(entry_id: str, user: dict = Depends(get_current_user)):
 @api_router.get("/summary/dashboard")
 async def dashboard_summary(user: dict = Depends(get_current_user)):
     cyc = await get_current_cycle(user["id"])
-    # All entries in current cycle
-    entries = await db.entries.find({"user_id": user["id"], "cycle_id": cyc["id"]}, {"_id": 0}).sort("date", -1).to_list(length=200)
+    # Entries in current open cycle (empty list if no cycle)
+    if cyc:
+        entries = await db.entries.find({"user_id": user["id"], "cycle_id": cyc["id"]}, {"_id": 0}).sort("date", -1).to_list(length=200)
+    else:
+        entries = []
     for e in entries:
         enrich_entry(e)
     total_driving = sum(e["total_driving_minutes"] for e in entries)
