@@ -482,9 +482,37 @@ async def delete_entry(entry_id: str, user: dict = Depends(get_current_user)):
     if not existing:
         raise HTTPException(status_code=404, detail="Entrée introuvable")
     await db.entries.delete_one({"id": entry_id, "user_id": user["id"]})
-    if existing.get("cycle_id"):
-        await recompute_cycle_counters(existing["cycle_id"])
-    return {"ok": True}
+    reverted_to_cycle = None
+    cycle_id = existing.get("cycle_id")
+    if cycle_id:
+        await recompute_cycle_counters(cycle_id)
+        # If the deleted entry belonged to the CURRENT open cycle and that cycle
+        # is now empty, automatically revert to the previously closed cycle
+        # (re-open it) so the driver continues from where they were before
+        # starting a new cycle.
+        cyc = await db.cycles.find_one({"id": cycle_id})
+        if cyc and cyc.get("ended_at") is None:
+            remaining = await db.entries.count_documents(
+                {"user_id": user["id"], "cycle_id": cycle_id}
+            )
+            if remaining == 0:
+                prev = await db.cycles.find_one(
+                    {
+                        "user_id": user["id"],
+                        "id": {"$ne": cycle_id},
+                        "ended_at": {"$ne": None},
+                    },
+                    sort=[("ended_at", -1)],
+                )
+                if prev:
+                    await db.cycles.delete_one({"id": cycle_id})
+                    await db.cycles.update_one(
+                        {"id": prev["id"]},
+                        {"$set": {"ended_at": None}},
+                    )
+                    await recompute_cycle_counters(prev["id"])
+                    reverted_to_cycle = prev["id"]
+    return {"ok": True, "reverted_to_cycle": reverted_to_cycle}
 
 
 # ============================================================

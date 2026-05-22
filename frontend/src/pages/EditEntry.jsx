@@ -34,8 +34,12 @@ export default function EditEntry() {
   const onDelete = async () => {
     if (!window.confirm("Supprimer cette journée définitivement ?")) return;
     try {
-      await api.delete(`/entries/${id}`);
-      toast.success("Journée supprimée");
+      const { data } = await api.delete(`/entries/${id}`);
+      if (data?.reverted_to_cycle) {
+        toast.success("Journée supprimée — retour au cycle précédent");
+      } else {
+        toast.success("Journée supprimée");
+      }
       nav("/history", { replace: true });
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail) || "Erreur");

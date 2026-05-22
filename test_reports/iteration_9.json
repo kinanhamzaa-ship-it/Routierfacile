@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 9 auto-revert on empty cycle deletion fully validated. All 7 backend pytest scenarios pass; legacy entry scenario verified via direct MongoDB insertion. DELETE /api/entries/{id} returns {ok:true, reverted_to_cycle:<id|null>} and correctly reopens previous closed cycle (with restored snapshots) only when the deleted entry was the last in the current OPEN cycle.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auto_revert_cycle.py",
+    "/app/test_reports/pytest/iter9_auto_revert.xml"
+  ],
+  "tests_executed": [
+    "test_delete_response_shape - shape {ok, reverted_to_cycle} returned",
+    "test_non_last_entry_delete_no_revert - reverted_to_cycle null, cycle stays open",
+    "test_last_entry_with_prev_closed_cycle_triggers_revert - empty new cycle deleted, prior closed cycle reopened, dashboard.cycle.total_driving_minutes restored, days_worked correct",
+    "test_last_entry_no_prev_closed_cycle_no_revert - no revert; cycle stays open and empty",
+    "test_delete_from_closed_cycle_no_revert - deleting any entry (incl. last) from a CLOSED cycle never triggers revert",
+    "test_after_revert_new_entry_attaches_to_reopened_cycle - subsequent POST /api/entries attaches to reopened cycle (not a fresh one)",
+    "test_revert_picks_most_recent_closed_cycle - among multiple closed cycles, the most recently closed one is reopened",
+    "legacy cycle_id=null deletion (direct mongo insertion) - reverted_to_cycle null, current open cycle untouched"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "delete_entry logic uses find_one to read cycle including _id; not serialized (no return of _id) so fine, but consider projecting {'_id': 0} for consistency with other reads.",
+    "server.py is ~700 lines; near the recommended split threshold. Future iterations should consider splitting into auth/entries/cycles/summary modules.",
+    "Previous-cycle lookup sort=[('ended_at', -1)] relies on ISO-string ordering which is correct for UTC isoformat strings but worth documenting.",
+    "Auto-revert path correctly recomputes cycle counters on the reopened cycle so dashboard.total_driving_minutes is restored."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auto_revert_cycle.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "admin@routier-facile.fr / Admin123! (loaded from /app/memory/test_credentials.md); fresh TEST_revert_* users registered per test",
+  "seed_data_creation": "Each test registers a fresh TEST_revert_<uuid>@example.com user; legacy mongo-insert test cleans up entries/cycles/user after run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Auto-revert delete behavior is locked in by /app/backend/tests/test_auto_revert_cycle.py. Frontend EditEntry toast wording ('Journée supprimée — retour au cycle précédent' vs 'Journée supprimée') was deprioritized in this iteration; if tested next, mock or trigger both paths by setting up cycles via API before navigating to EditEntry."
+}
