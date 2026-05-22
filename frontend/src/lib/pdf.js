@@ -20,7 +20,7 @@ export function exportMonthlyPdf({ year, month, summary, driverName }) {
     ["Jours travaillés", String(summary.working_days)],
     ["Conduite totale", minutesToHM(summary.total_driving_minutes)],
     ["Travail total", minutesToHM(summary.total_working_minutes)],
-    ["Repos total", minutesToHM(summary.total_rest_minutes)],
+    ["Repos & pauses", minutesToHM(summary.total_rest_minutes)],
     ["Découcher", String(summary.decoucher_count)],
     ["Repas OUI", String(summary.meal_counts.yes)],
     ["Repas NON", String(summary.meal_counts.no)],
@@ -38,21 +38,23 @@ export function exportMonthlyPdf({ year, month, summary, driverName }) {
 
   const rows = (summary.entries || []).map((e) => [
     formatDateFR(e.date),
-    `${e.start_time} → ${e.end_time}`,
-    minutesToHM(e.total_driving_minutes),
+    `${e.start_time}\n${e.end_time}`,
+    minutesToHM(e.amplitude_minutes),
     minutesToHM(e.total_working_minutes),
+    minutesToHM(e.total_driving_minutes),
     minutesToHM(e.total_rest_minutes),
-    `${e.departure || ""} → ${e.arrival || ""}`,
+    e.daily_rest_minutes != null ? minutesToHM(e.daily_rest_minutes) : "N/A",
+    `${e.departure || ""}\n→ ${e.arrival || ""}`,
     e.decoucher ? "Oui" : "Non",
     e.meal_status === "yes" ? "Oui" : e.meal_status === "no" ? "Non" : "Pas sûr",
   ]);
 
   autoTable(doc, {
-    head: [["Date", "Horaires", "Conduite", "Travail", "Repos", "Trajet", "Découcher", "Repas"]],
+    head: [["Date", "Horaires", "Amplitude", "Travail", "Conduite", "Pauses", "Repos prec.", "Trajet", "Découcher", "Repas"]],
     body: rows,
     theme: "striped",
     headStyles: { fillColor: [0, 122, 255], textColor: 255 },
-    styles: { fontSize: 8, cellPadding: 4 },
+    styles: { fontSize: 7, cellPadding: 3 },
     startY: doc.lastAutoTable.finalY + 20,
   });
 

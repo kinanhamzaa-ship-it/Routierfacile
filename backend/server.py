@@ -15,11 +15,8 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Respons
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
-from collections import defaultdict
 
 
-# ============================================================
-# Setup
 # ============================================================
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -29,17 +26,21 @@ app = FastAPI(title="Routier Facile API")
 api_router = APIRouter(prefix="/api")
 
 JWT_ALGORITHM = "HS256"
+WEEKLY_DRIVING_LIMIT = 56 * 60  # minutes
+DAILY_DRIVING_EXTENSION_MIN = 9 * 60  # > 9h triggers extension counter
+DAILY_DRIVING_EXTENSION_MAX = 10 * 60
+WEEKLY_REST_FULL = 45 * 60  # >= 45h => weekly rest
+WEEKLY_REST_MIN = 24 * 60   # 24-45h => reduced weekly rest candidate
+DAILY_REST_OK = 11 * 60
+DAILY_REST_REDUCED = 9 * 60
 
 
 def get_jwt_secret() -> str:
     return os.environ["JWT_SECRET"]
 
 
-# ============================================================
-# Password & JWT helpers
-# ============================================================
-def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+def hash_password(p: str) -> str:
+    return bcrypt.hashpw(p.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
@@ -47,18 +48,14 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: str, email: str) -> str:
-    payload = {
-        "sub": user_id,
-        "email": email,
-        "exp": datetime.now(timezone.utc) + timedelta(days=7),
-        "type": "access",
-    }
-    return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
+    return jwt.encode(
+        {"sub": user_id, "email": email, "exp": datetime.now(timezone.utc) + timedelta(days=7), "type": "access"},
+        get_jwt_secret(), algorithm=JWT_ALGORITHM,
+    )
 
 
 # ============================================================
 # Models
-# ============================================================
 class UserOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
@@ -87,11 +84,11 @@ MealStatus = Literal["yes", "no", "unsure"]
 
 
 class DailyEntryIn(BaseModel):
-    date: str  # YYYY-MM-DD
-    start_time: str  # HH:MM
-    end_time: str  # HH:MM
-    driving_segments: List[int] = Field(default_factory=list)  # minutes
-    rest_breaks: List[int] = Field(default_factory=list)  # minutes
+    date: str
+    start_time: str
+    end_time: str
+    driving_segments: List[int] = Field(default_factory=list)
+    rest_breaks: List[int] = Field(default_factory=list)
     departure: Optional[str] = ""
     arrival: Optional[str] = ""
     notes: Optional[str] = ""
@@ -99,21 +96,13 @@ class DailyEntryIn(BaseModel):
     meal_status: MealStatus = "unsure"
 
 
-class DailyEntryOut(DailyEntryIn):
-    id: str
-    user_id: str
-    created_at: str
-    updated_at: str
-    # computed
-    total_driving_minutes: int
-    total_rest_minutes: int
-    total_working_minutes: int
-    amplitude_minutes: int
+class DetectIn(BaseModel):
+    date: str
+    start_time: str
 
 
 # ============================================================
-# Time computations
-# ============================================================
+# Time helpers
 def parse_hhmm_to_minutes(s: str) -> int:
     h, m = s.split(":")
     return int(h) * 60 + int(m)
@@ -123,8 +112,23 @@ def compute_amplitude(start: str, end: str) -> int:
     s = parse_hhmm_to_minutes(start)
     e = parse_hhmm_to_minutes(end)
     if e < s:
-        e += 24 * 60  # overnight
+        e += 24 * 60
     return e - s
+
+
+def to_dt(date_str: str, hhmm: str) -> datetime:
+    y, m, d = [int(x) for x in date_str.split("-")]
+    h, mi = [int(x) for x in hhmm.split(":")]
+    return datetime(y, m, d, h, mi, tzinfo=timezone.utc)
+
+
+def end_dt(entry: dict) -> datetime:
+    """Returns the actual end datetime accounting for overnight shifts."""
+    start = to_dt(entry["date"], entry["start_time"])
+    end = to_dt(entry["date"], entry["end_time"])
+    if end < start:
+        end = end + timedelta(days=1)
+    return end
 
 
 def enrich_entry(doc: dict) -> dict:
@@ -136,12 +140,24 @@ def enrich_entry(doc: dict) -> dict:
     doc["total_rest_minutes"] = rest
     doc["total_working_minutes"] = working
     doc["amplitude_minutes"] = amp
+    # daily_rest_status from already-stored daily_rest_minutes
+    dr = doc.get("daily_rest_minutes")
+    if dr is None:
+        doc["daily_rest_status"] = None
+    elif dr >= DAILY_REST_OK:
+        doc["daily_rest_status"] = "ok"
+    elif dr >= DAILY_REST_REDUCED:
+        doc["daily_rest_status"] = "reduced"
+    else:
+        doc["daily_rest_status"] = "warning"
+    # extension flag
+    doc["is_driving_extension"] = DAILY_DRIVING_EXTENSION_MIN < driving <= DAILY_DRIVING_EXTENSION_MAX
+    doc["is_legacy"] = doc.get("cycle_id") is None
     return doc
 
 
 # ============================================================
-# Auth dependency
-# ============================================================
+# Auth dep
 async def get_current_user(request: Request) -> dict:
     token = None
     auth_header = request.headers.get("Authorization", "")
@@ -165,27 +181,78 @@ async def get_current_user(request: Request) -> dict:
 
 
 # ============================================================
-# Auth endpoints
+# Cycle helpers
+async def get_current_cycle(user_id: str) -> dict:
+    """Return current open cycle, creating one if none."""
+    cyc = await db.cycles.find_one({"user_id": user_id, "ended_at": None}, {"_id": 0})
+    if cyc:
+        return cyc
+    new_cyc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "ended_at": None,
+        "reduced_rest_used": 0,
+        "extensions_used": 0,
+        "is_reduced_weekly_rest": False,
+    }
+    await db.cycles.insert_one(dict(new_cyc))
+    return new_cyc
+
+
+async def close_current_cycle_and_open_new(user_id: str, is_reduced: bool = False) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    await db.cycles.update_one(
+        {"user_id": user_id, "ended_at": None},
+        {"$set": {"ended_at": now}}
+    )
+    new_cyc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "started_at": now,
+        "ended_at": None,
+        "reduced_rest_used": 0,
+        "extensions_used": 0,
+        "is_reduced_weekly_rest": is_reduced,
+    }
+    await db.cycles.insert_one(dict(new_cyc))
+    return new_cyc
+
+
+async def recompute_cycle_counters(cycle_id: str):
+    """Recompute reduced_rest_used and extensions_used from all entries in cycle."""
+    cursor = db.entries.find({"cycle_id": cycle_id}, {"_id": 0})
+    entries = await cursor.to_list(length=200)
+    reduced = 0
+    ext = 0
+    for e in entries:
+        enrich_entry(e)
+        if e.get("daily_rest_status") == "reduced":
+            reduced += 1
+        if e.get("is_driving_extension"):
+            ext += 1
+    await db.cycles.update_one(
+        {"id": cycle_id},
+        {"$set": {"reduced_rest_used": reduced, "extensions_used": ext}}
+    )
+
+
 # ============================================================
+# Auth endpoints
 @api_router.post("/auth/register", response_model=AuthResponse)
 async def register(payload: RegisterIn, response: Response):
     email = payload.email.lower().strip()
-    existing = await db.users.find_one({"email": email})
-    if existing:
+    if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Cet email est déjà utilisé")
-    user_id = str(uuid.uuid4())
-    doc = {
-        "id": user_id,
-        "email": email,
-        "password_hash": hash_password(payload.password),
-        "name": payload.name or email.split("@")[0],
-        "role": "driver",
+    uid = str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": uid, "email": email, "password_hash": hash_password(payload.password),
+        "name": payload.name or email.split("@")[0], "role": "driver",
         "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.users.insert_one(doc)
-    token = create_access_token(user_id, email)
-    response.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=7 * 24 * 3600, path="/")
-    return {"user": {"id": user_id, "email": email, "name": doc["name"], "role": "driver"}, "token": token}
+    })
+    token = create_access_token(uid, email)
+    response.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=7*24*3600, path="/")
+    return {"user": {"id": uid, "email": email, "name": payload.name or email.split("@")[0], "role": "driver"}, "token": token}
 
 
 @api_router.post("/auth/login", response_model=AuthResponse)
@@ -195,7 +262,7 @@ async def login(payload: LoginIn, response: Response):
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
     token = create_access_token(user["id"], email)
-    response.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=7 * 24 * 3600, path="/")
+    response.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=7*24*3600, path="/")
     return {"user": {"id": user["id"], "email": email, "name": user.get("name"), "role": user.get("role", "driver")}, "token": token}
 
 
@@ -211,50 +278,97 @@ async def me(user: dict = Depends(get_current_user)):
 
 
 # ============================================================
-# Daily entries
+# Detection
+@api_router.post("/cycles/detect-rest")
+async def detect_rest(payload: DetectIn, user: dict = Depends(get_current_user)):
+    """Given a new start datetime, look at previous entry's end and return detection signal."""
+    prev = await db.entries.find_one(
+        {"user_id": user["id"], "date": {"$lt": payload.date}},
+        {"_id": 0}, sort=[("date", -1)]
+    )
+    if not prev:
+        return {"daily_rest_minutes": None, "detection": None}
+    prev_end = end_dt(prev)
+    new_start = to_dt(payload.date, payload.start_time)
+    rest_minutes = int((new_start - prev_end).total_seconds() // 60)
+    if rest_minutes < 0:
+        rest_minutes = 0
+    detection = None
+    if rest_minutes >= WEEKLY_REST_FULL:
+        detection = "weekly_rest_full"
+    elif rest_minutes >= WEEKLY_REST_MIN:
+        detection = "weekly_rest_reduced"
+    return {"daily_rest_minutes": rest_minutes, "detection": detection}
+
+
 # ============================================================
-@api_router.post("/entries", response_model=DailyEntryOut)
+# Cycle endpoints
+@api_router.get("/cycles/current")
+async def current_cycle(user: dict = Depends(get_current_user)):
+    cyc = await get_current_cycle(user["id"])
+    return cyc
+
+
+@api_router.post("/cycles/start-new")
+async def start_new_cycle(user: dict = Depends(get_current_user)):
+    cyc = await close_current_cycle_and_open_new(user["id"], is_reduced=False)
+    return cyc
+
+
+@api_router.post("/cycles/confirm-reduced")
+async def confirm_reduced(user: dict = Depends(get_current_user)):
+    cyc = await close_current_cycle_and_open_new(user["id"], is_reduced=True)
+    return cyc
+
+
+# ============================================================
+# Entries
+@api_router.post("/entries")
 async def create_entry(payload: DailyEntryIn, user: dict = Depends(get_current_user)):
-    existing = await db.entries.find_one({"user_id": user["id"], "date": payload.date})
-    if existing:
+    if await db.entries.find_one({"user_id": user["id"], "date": payload.date}):
         raise HTTPException(status_code=400, detail="Une entrée existe déjà pour cette date. Modifiez-la.")
+    # Compute daily rest
+    prev = await db.entries.find_one(
+        {"user_id": user["id"], "date": {"$lt": payload.date}},
+        {"_id": 0}, sort=[("date", -1)]
+    )
+    daily_rest = None
+    if prev:
+        prev_end = end_dt(prev)
+        new_start = to_dt(payload.date, payload.start_time)
+        daily_rest = max(int((new_start - prev_end).total_seconds() // 60), 0)
+    cyc = await get_current_cycle(user["id"])
     now = datetime.now(timezone.utc).isoformat()
     doc = payload.model_dump()
     doc.update({
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
+        "cycle_id": cyc["id"],
+        "daily_rest_minutes": daily_rest,
         "created_at": now,
         "updated_at": now,
     })
     enrich_entry(doc)
-    to_insert = {k: v for k, v in doc.items()}
-    await db.entries.insert_one(to_insert)
+    await db.entries.insert_one(dict(doc))
+    await recompute_cycle_counters(cyc["id"])
     return {k: v for k, v in doc.items() if k != "_id"}
 
 
-@api_router.get("/entries", response_model=List[DailyEntryOut])
-async def list_entries(
-    user: dict = Depends(get_current_user),
-    start: Optional[str] = None,
-    end: Optional[str] = None,
-    limit: int = 200,
-):
+@api_router.get("/entries")
+async def list_entries(user: dict = Depends(get_current_user), start: Optional[str] = None, end: Optional[str] = None, limit: int = 200):
     q = {"user_id": user["id"]}
     if start or end:
         d = {}
-        if start:
-            d["$gte"] = start
-        if end:
-            d["$lte"] = end
+        if start: d["$gte"] = start
+        if end: d["$lte"] = end
         q["date"] = d
-    cursor = db.entries.find(q, {"_id": 0}).sort("date", -1).limit(limit)
-    items = await cursor.to_list(length=limit)
+    items = await db.entries.find(q, {"_id": 0}).sort("date", -1).limit(limit).to_list(length=limit)
     for it in items:
         enrich_entry(it)
     return items
 
 
-@api_router.get("/entries/{entry_id}", response_model=DailyEntryOut)
+@api_router.get("/entries/{entry_id}")
 async def get_entry(entry_id: str, user: dict = Depends(get_current_user)):
     doc = await db.entries.find_one({"id": entry_id, "user_id": user["id"]}, {"_id": 0})
     if not doc:
@@ -263,152 +377,156 @@ async def get_entry(entry_id: str, user: dict = Depends(get_current_user)):
     return doc
 
 
-@api_router.put("/entries/{entry_id}", response_model=DailyEntryOut)
+@api_router.put("/entries/{entry_id}")
 async def update_entry(entry_id: str, payload: DailyEntryIn, user: dict = Depends(get_current_user)):
     existing = await db.entries.find_one({"id": entry_id, "user_id": user["id"]}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Entrée introuvable")
+    # Recompute daily rest based on (possibly new) date/start
+    prev = await db.entries.find_one(
+        {"user_id": user["id"], "date": {"$lt": payload.date}, "id": {"$ne": entry_id}},
+        {"_id": 0}, sort=[("date", -1)]
+    )
+    daily_rest = None
+    if prev:
+        prev_end = end_dt(prev)
+        new_start = to_dt(payload.date, payload.start_time)
+        daily_rest = max(int((new_start - prev_end).total_seconds() // 60), 0)
     update = payload.model_dump()
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    update["daily_rest_minutes"] = daily_rest
     await db.entries.update_one({"id": entry_id, "user_id": user["id"]}, {"$set": update})
     merged = {**existing, **update}
     enrich_entry(merged)
+    if existing.get("cycle_id"):
+        await recompute_cycle_counters(existing["cycle_id"])
     return merged
 
 
 @api_router.delete("/entries/{entry_id}")
 async def delete_entry(entry_id: str, user: dict = Depends(get_current_user)):
-    res = await db.entries.delete_one({"id": entry_id, "user_id": user["id"]})
-    if res.deleted_count == 0:
+    existing = await db.entries.find_one({"id": entry_id, "user_id": user["id"]}, {"_id": 0})
+    if not existing:
         raise HTTPException(status_code=404, detail="Entrée introuvable")
+    await db.entries.delete_one({"id": entry_id, "user_id": user["id"]})
+    if existing.get("cycle_id"):
+        await recompute_cycle_counters(existing["cycle_id"])
     return {"ok": True}
 
 
 # ============================================================
-# Summary endpoints
-# ============================================================
-def iso_week_range(target: date_cls):
-    # Monday as first day
-    monday = target - timedelta(days=target.weekday())
-    sunday = monday + timedelta(days=6)
-    return monday.isoformat(), sunday.isoformat()
-
-
-@api_router.get("/summary/week")
-async def week_summary(date: Optional[str] = None, user: dict = Depends(get_current_user)):
-    target = date_cls.fromisoformat(date) if date else datetime.now(timezone.utc).date()
-    start, end = iso_week_range(target)
-    cursor = db.entries.find({"user_id": user["id"], "date": {"$gte": start, "$lte": end}}, {"_id": 0})
-    entries = await cursor.to_list(length=10)
+# Summaries
+@api_router.get("/summary/dashboard")
+async def dashboard_summary(user: dict = Depends(get_current_user)):
+    cyc = await get_current_cycle(user["id"])
+    # All entries in current cycle
+    entries = await db.entries.find({"user_id": user["id"], "cycle_id": cyc["id"]}, {"_id": 0}).sort("date", -1).to_list(length=200)
     for e in entries:
         enrich_entry(e)
     total_driving = sum(e["total_driving_minutes"] for e in entries)
     total_working = sum(e["total_working_minutes"] for e in entries)
     total_rest = sum(e["total_rest_minutes"] for e in entries)
-    decoucher_count = sum(1 for e in entries if e.get("decoucher"))
-    weekly_limit = 56 * 60  # minutes
-    remaining = max(weekly_limit - total_driving, 0)
-    if total_driving >= weekly_limit:
+    decoucher_count_cycle = sum(1 for e in entries if e.get("decoucher"))
+    days = len(entries)
+    remaining = max(WEEKLY_DRIVING_LIMIT - total_driving, 0)
+    if total_driving >= WEEKLY_DRIVING_LIMIT:
         status = "red"
-    elif total_driving >= weekly_limit * 0.85:
+    elif total_driving >= WEEKLY_DRIVING_LIMIT * 0.85:
         status = "orange"
     else:
         status = "green"
+
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    today_entry = next((e for e in entries if e["date"] == today_iso), None)
+    last_entry = entries[0] if entries else None
+
+    # Month stats (calendar month, for meal counters)
+    now = datetime.now(timezone.utc).date()
+    m_start = now.replace(day=1).isoformat()
+    if now.month == 12:
+        m_end_d = date_cls(now.year + 1, 1, 1) - timedelta(days=1)
+    else:
+        m_end_d = date_cls(now.year, now.month + 1, 1) - timedelta(days=1)
+    m_entries = await db.entries.find({"user_id": user["id"], "date": {"$gte": m_start, "$lte": m_end_d.isoformat()}}, {"_id": 0}).to_list(length=400)
+    for e in m_entries:
+        enrich_entry(e)
+    meal_counts = {"yes": 0, "no": 0, "unsure": 0}
+    decoucher_month = 0
+    driving_month = 0
+    for e in m_entries:
+        meal_counts[e.get("meal_status", "unsure")] = meal_counts.get(e.get("meal_status", "unsure"), 0) + 1
+        if e.get("decoucher"):
+            decoucher_month += 1
+        driving_month += e["total_driving_minutes"]
+
     return {
-        "week_start": start,
-        "week_end": end,
-        "total_driving_minutes": total_driving,
-        "total_working_minutes": total_working,
-        "total_rest_minutes": total_rest,
-        "decoucher_count": decoucher_count,
-        "days_worked": len(entries),
-        "weekly_limit_minutes": weekly_limit,
-        "remaining_minutes": remaining,
-        "status": status,
-        "entries": entries,
+        "cycle": {
+            "id": cyc["id"],
+            "started_at": cyc["started_at"],
+            "is_reduced_weekly_rest": cyc.get("is_reduced_weekly_rest", False),
+            "total_driving_minutes": total_driving,
+            "total_working_minutes": total_working,
+            "total_rest_minutes": total_rest,
+            "days_worked": days,
+            "decoucher_count": decoucher_count_cycle,
+            "weekly_limit_minutes": WEEKLY_DRIVING_LIMIT,
+            "remaining_minutes": remaining,
+            "status": status,
+            "reduced_rest_used": cyc.get("reduced_rest_used", 0),
+            "reduced_rest_max": 3,
+            "extensions_used": cyc.get("extensions_used", 0),
+            "extensions_max": 2,
+        },
+        "today": today_entry,
+        "last_entry": last_entry,
+        "month": {
+            "year": now.year,
+            "month": now.month,
+            "total_driving_minutes": driving_month,
+            "working_days": len(m_entries),
+            "decoucher_count": decoucher_month,
+            "meal_counts": meal_counts,
+        },
     }
 
 
 @api_router.get("/summary/month")
 async def month_summary(year: int, month: int, user: dict = Depends(get_current_user)):
     start = date_cls(year, month, 1).isoformat()
-    if month == 12:
-        end = date_cls(year + 1, 1, 1) - timedelta(days=1)
-    else:
-        end = date_cls(year, month + 1, 1) - timedelta(days=1)
-    end_iso = end.isoformat()
-    cursor = db.entries.find({"user_id": user["id"], "date": {"$gte": start, "$lte": end_iso}}, {"_id": 0}).sort("date", 1)
-    entries = await cursor.to_list(length=500)
+    end_d = date_cls(year + 1, 1, 1) - timedelta(days=1) if month == 12 else date_cls(year, month + 1, 1) - timedelta(days=1)
+    entries = await db.entries.find({"user_id": user["id"], "date": {"$gte": start, "$lte": end_d.isoformat()}}, {"_id": 0}).sort("date", 1).to_list(length=500)
     for e in entries:
         enrich_entry(e)
-    total_driving = sum(e["total_driving_minutes"] for e in entries)
-    total_working = sum(e["total_working_minutes"] for e in entries)
-    total_rest = sum(e["total_rest_minutes"] for e in entries)
-    decoucher_count = sum(1 for e in entries if e.get("decoucher"))
     meal_counts = {"yes": 0, "no": 0, "unsure": 0}
     for e in entries:
         meal_counts[e.get("meal_status", "unsure")] = meal_counts.get(e.get("meal_status", "unsure"), 0) + 1
     return {
-        "year": year,
-        "month": month,
-        "total_driving_minutes": total_driving,
-        "total_working_minutes": total_working,
-        "total_rest_minutes": total_rest,
-        "decoucher_count": decoucher_count,
+        "year": year, "month": month,
+        "total_driving_minutes": sum(e["total_driving_minutes"] for e in entries),
+        "total_working_minutes": sum(e["total_working_minutes"] for e in entries),
+        "total_rest_minutes": sum(e["total_rest_minutes"] for e in entries),
+        "decoucher_count": sum(1 for e in entries if e.get("decoucher")),
         "working_days": len(entries),
         "meal_counts": meal_counts,
         "entries": entries,
     }
 
 
-@api_router.get("/summary/dashboard")
-async def dashboard_summary(user: dict = Depends(get_current_user)):
-    today = datetime.now(timezone.utc).date()
-    week = await week_summary(date=today.isoformat(), user=user)
-    month = await month_summary(year=today.year, month=today.month, user=user)
-    # Compare today's rest to yesterday: if today's working > 13h amp warning
-    last_entries_cursor = db.entries.find({"user_id": user["id"]}, {"_id": 0}).sort("date", -1).limit(2)
-    last = await last_entries_cursor.to_list(length=2)
-    daily_rest_status = "green"
-    if len(last) >= 1:
-        e = last[0]
-        enrich_entry(e)
-        if e["amplitude_minutes"] > 15 * 60:
-            daily_rest_status = "red"
-        elif e["amplitude_minutes"] > 13 * 60:
-            daily_rest_status = "orange"
-    return {
-        "week": week,
-        "month": {
-            "year": month["year"],
-            "month": month["month"],
-            "total_driving_minutes": month["total_driving_minutes"],
-            "decoucher_count": month["decoucher_count"],
-            "working_days": month["working_days"],
-            "meal_counts": month["meal_counts"],
-        },
-        "daily_rest_status": daily_rest_status,
-    }
-
-
 # ============================================================
 # Bootstrap
-# ============================================================
 @app.on_event("startup")
 async def startup():
     await db.users.create_index("email", unique=True)
     await db.entries.create_index([("user_id", 1), ("date", -1)])
-    # Seed admin
+    await db.cycles.create_index([("user_id", 1), ("ended_at", 1)])
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@routier-facile.fr")
     admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")
     existing = await db.users.find_one({"email": admin_email})
     if not existing:
         await db.users.insert_one({
-            "id": str(uuid.uuid4()),
-            "email": admin_email,
+            "id": str(uuid.uuid4()), "email": admin_email,
             "password_hash": hash_password(admin_password),
-            "name": "Admin",
-            "role": "admin",
+            "name": "Admin", "role": "admin",
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
     elif not verify_password(admin_password, existing["password_hash"]):
@@ -426,7 +544,6 @@ async def root():
 
 
 app.include_router(api_router)
-
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -434,6 +551,5 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

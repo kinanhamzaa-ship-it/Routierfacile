@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 3 testing of Routier Facile cycle-based logic. Backend: 19/19 pytest tests PASSED including new endpoints /api/cycles/detect-rest, /api/cycles/start-new, /api/cycles/confirm-reduced, /api/cycles/current, enriched entries (daily_rest_status, is_driving_extension, is_legacy, amplitude_minutes), dashboard 'cycle' summary with reduced_rest_used/extensions_used counters, daily-rest auto-computation, cycle counter recompute on PUT/DELETE, and legacy admin entry flagging. Frontend (420x900 mobile viewport): registered new user, ComplianceBar correctly shows 'Cycle en cours', driving/56h00, REPOS JOUR (OK with 84h00 after second entry), REPOS RÉDUITS 0/3, EXTENSIONS 10H 0/2. EntryForm sticky live-totals card updates in real-time: amplitude, heures travaillées, conduite, pauses & repos. Extension warning shown at >9h driving; over-driving warning at >10h. First entry created with no detection. Second entry 4 days later triggered RestDetectionModal with title 'Repos hebdomadaire détecté' and 84h00 rest; clicking 'Oui démarrer un nouveau cycle' closed old cycle, opened new, and persisted entry (new cycle shows 6h00/56h00). History page lists entries with amplitude, heures travaillées, pauses, repos précédent (N/A for first, 84h00 for second), and meal status. All major flows working end-to-end.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "All authenticated pages (mobile 420px)",
+        "issues": [
+          "'Made with Emergent' floating badge still appears bottom-right and visually competes with bottom-nav. nav-monthly tab still appears partly clipped behind the badge on 420px viewport (carry-over from iteration 1). Not blocking — tab click still works because nav z-index was raised."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: investigate 'Made with Emergent' badge overlap with bottom nav on 420px — purely cosmetic, navigation still works.",
+    "Optional: today-section is only rendered when an entry exists for today's date — could show an empty-state placeholder for clarity (currently hidden when last entry is in the past)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~556 lines — still acceptable but approaching the recommended 700-line split threshold. Consider splitting into routers/{auth,cycles,entries,summary}.py before next iteration.",
+    "recompute_cycle_counters reads up to 200 entries from a single cycle into memory each time — fine for now (a cycle is usually <30 days) but could become slow. A simpler alternative: persist daily_rest_status/is_driving_extension at write time and increment counters atomically.",
+    "DetectIn.start_time is not validated against a HH:MM regex; parse_hhmm_to_minutes will raise an ugly ValueError → 500 if a malformed string is passed. Add Pydantic Field(pattern=r'^\\d{2}:\\d{2}$') for robustness.",
+    "create_entry duplicates the daily-rest computation that detect-rest already returned. Frontend could send the precomputed value, or both code paths could share a helper to avoid drift.",
+    "CORS allow_origins still defaults to '*' with allow_credentials=True (browsers reject this combo). Set explicit origins in production .env."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": { "backend": "100% (19/19)", "frontend": "100% on tested flows" },
+  "test_credentials": "admin@routier-facile.fr / Admin123! (seeded). E2E user: TEST_e2e_*@example.com / Passw0rd! (created during tests).",
+  "seed_data_creation": "Pytest created a TEST_user_* driver with multiple entries across two cycles (start-new + confirm-reduced exercised). Playwright created another TEST_e2e_* user with 2 entries spanning a forced new cycle.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All cycle endpoints and the detection flow are verified end-to-end. Backend regression suite at /app/backend/tests/backend_test.py covers 19 cases including auth, cycle lifecycle, entry CRUD with recompute, detect-rest (no-signal, weekly_rest_full, weekly_rest_reduced), enriched fields, and dashboard summary structure. To re-trigger detection in UI, create an entry whose date is ≥3 days after the most recent existing entry — gap will exceed 45h."
+}

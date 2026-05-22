@@ -92,3 +92,9 @@ input[type="number"]::-webkit-outer-spin-button {
   margin: 0;
 }
 input[type="number"] { -moz-appearance: textfield; }
+
+/* Lift Emergent dev badge above the sticky bottom nav so it doesn't block taps */
+#emergent-badge {
+  bottom: 84px !important;
+  z-index: 70 !important;
+}
