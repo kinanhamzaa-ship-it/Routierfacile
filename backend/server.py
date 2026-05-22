@@ -526,6 +526,33 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
                 )
         enrich_entry(latest_doc)
 
+    # Previous closed cycle — for visibility/comparison at the start of new cycle
+    prev_cycle_doc = await db.cycles.find_one(
+        {"user_id": user["id"], "ended_at": {"$ne": None}},
+        {"_id": 0},
+        sort=[("ended_at", -1)],
+    )
+    previous_cycle = None
+    if prev_cycle_doc:
+        # Backfill snapshot if missing on old cycles
+        if prev_cycle_doc.get("total_driving_minutes") is None:
+            await recompute_cycle_counters(prev_cycle_doc["id"])
+            prev_cycle_doc = await db.cycles.find_one({"id": prev_cycle_doc["id"]}, {"_id": 0})
+        previous_cycle = {
+            "id": prev_cycle_doc["id"],
+            "started_at": prev_cycle_doc.get("started_at"),
+            "ended_at": prev_cycle_doc.get("ended_at"),
+            "is_reduced_weekly_rest": prev_cycle_doc.get("is_reduced_weekly_rest", False),
+            "total_driving_minutes": prev_cycle_doc.get("total_driving_minutes", 0),
+            "total_working_minutes": prev_cycle_doc.get("total_working_minutes", 0),
+            "total_rest_minutes": prev_cycle_doc.get("total_rest_minutes", 0),
+            "days_worked": prev_cycle_doc.get("days_worked", 0),
+            "decoucher_count": prev_cycle_doc.get("decoucher_count", 0),
+            "reduced_rest_used": prev_cycle_doc.get("reduced_rest_used", 0),
+            "extensions_used": prev_cycle_doc.get("extensions_used", 0),
+            "break_violations_count": prev_cycle_doc.get("break_violations_count", 0),
+        }
+
     # Month stats (calendar month, for meal counters)
     now = datetime.now(timezone.utc).date()
     m_start = now.replace(day=1).isoformat()
@@ -564,6 +591,7 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
         "today": today_entry,
         "last_entry": last_entry_cycle,
         "latest_entry": latest_doc,
+        "previous_cycle": previous_cycle,
         "month": {
             "year": now.year,
             "month": now.month,

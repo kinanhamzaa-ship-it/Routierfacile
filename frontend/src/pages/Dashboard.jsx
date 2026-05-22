@@ -71,6 +71,11 @@ export default function Dashboard() {
         </Link>
       </div>
 
+      {/* Previous cycle reference (shown at the start of a new cycle) */}
+      {data.previous_cycle && (
+        <PreviousCycleCard prev={data.previous_cycle} current={cycle} />
+      )}
+
       {/* Latest entry snapshot */}
       {latest && (
         <section className="px-4 pt-6" data-testid="today-section">
@@ -179,5 +184,63 @@ function SmallTile({ icon: Icon, label, value, testid, color = "rf-blue" }) {
       </div>
       <div className="font-display text-2xl tracking-tight mt-1">{value}</div>
     </div>
+  );
+}
+
+function PreviousCycleCard({ prev, current }) {
+  const formatDate = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
+  };
+  const fmtH = (m) => {
+    const h = Math.floor((m || 0) / 60);
+    const min = (m || 0) % 60;
+    return `${h}h${String(min).padStart(2, "0")}`;
+  };
+  return (
+    <section className="px-4 pt-5" data-testid="previous-cycle-card">
+      <div className="rf-label mb-2 flex items-center gap-2">
+        Référence · Cycle précédent
+        {prev.is_reduced_weekly_rest && (
+          <span className="rf-label text-rf-orange bg-rf-orange/15 px-1.5 py-0.5 rounded">
+            Repos réduit
+          </span>
+        )}
+      </div>
+      <div className="rf-card overflow-hidden">
+        <div className="px-4 py-2.5 text-[11px] text-rf-muted border-b border-rf-border flex items-center justify-between">
+          <span>Du {formatDate(prev.started_at)} au {formatDate(prev.ended_at)}</span>
+          <span>{prev.days_worked} j</span>
+        </div>
+        <table className="w-full text-sm" data-testid="previous-cycle-table">
+          <tbody>
+            <tr className="border-b border-rf-border">
+              <td className="px-4 py-2 text-rf-muted text-xs uppercase tracking-[0.12em]">Indicateur</td>
+              <td className="px-3 py-2 text-rf-muted text-xs uppercase tracking-[0.12em] text-right">Précédent</td>
+              <td className="px-4 py-2 text-rf-blue text-xs uppercase tracking-[0.12em] text-right">Cycle actuel</td>
+            </tr>
+            <Row label="Conduite totale" prev={fmtH(prev.total_driving_minutes)} curr={fmtH(current.total_driving_minutes)} highlight />
+            <Row label="Jours travaillés" prev={prev.days_worked} curr={current.days_worked} />
+            <Row label="Repos réduits" prev={`${prev.reduced_rest_used} / 3`} curr={`${current.reduced_rest_used} / 3`} />
+            <Row label="Extensions 10h" prev={`${prev.extensions_used} / 2`} curr={`${current.extensions_used} / 2`} />
+            <Row label="Découcher" prev={prev.decoucher_count} curr={current.decoucher_count} />
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] text-rf-muted mt-2 px-1">
+        Cycle de référence pour rester conforme à la réglementation européenne.
+      </p>
+    </section>
+  );
+}
+
+function Row({ label, prev, curr, highlight }) {
+  return (
+    <tr className="border-b border-rf-border last:border-b-0">
+      <td className="px-4 py-2 text-rf-muted">{label}</td>
+      <td className="px-3 py-2 text-right tabular-nums">{prev}</td>
+      <td className={`px-4 py-2 text-right font-medium tabular-nums ${highlight ? "text-rf-blue" : ""}`}>{curr}</td>
+    </tr>
   );
 }
