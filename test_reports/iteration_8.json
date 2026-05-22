@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 8 — STRICT break validation regression. Backend: 70/70 pytest PASSED (8 new strict scenarios + 7 parametrized double_equipage-no-effect cases in test_strict_break_rule.py; rewrote test_double_equipage.py to reflect that double_equipage no longer relaxes thresholds; existing 47 tests still pass). Frontend (420x900, admin@routier-facile.fr): all 5 live-indicator scenarios pass — [4h00/0h20]=breakrule-warning 'Pause 45 min non respectée'; [4h00/0h45]=breakrule-ok 'Pause 45 min respectée'; no driving => neither indicator; split [0h30+0h15]=ok; [3x0h15]=warning (no segment >=30). compute_break_rule + computeBreakRule in EntryForm.jsx are symmetric. double_equipage flag still stored and persisted, but does NOT alter break_rule_status (verified end-to-end: PUT toggling true/false on identical [240,240]+[30] keeps status='violation' both ways).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_strict_break_rule.py",
+    "/app/backend/tests/test_double_equipage.py",
+    "/app/test_reports/pytest/iter8_strict.xml",
+    "/app/test_reports/pytest/iter8_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:137-176 compute_break_rule is now strict: violated = max_acc>270 OR (total_driving>0 AND (total_break<45 OR not has_30_overall)). double_equipage is read by enrich_entry only to persist the flag and not used inside compute_break_rule signature — clean separation.",
+    "EntryForm.jsx:28-48 mirrors backend logic exactly (maxAcc>4h30 || (totalDriving>0 && (totalBreak<45 || !has30))) — UI/back parity confirmed for all 5 tested scenarios.",
+    "Strict rule means previously-relaxed co-driver scenarios (e.g. [240,240]+[30]) now always violate — this is the intended regression. Existing test_double_equipage.py needed rewriting; done in this iteration.",
+    "test_break_rule.py::test_ok_split_15_then_30 still only prints output for [270,270]+[15,30] — under strict rules max_acc=540>270 so it's a violation; consider adding an explicit assertion to lock the behaviour.",
+    "server.py is ~641 lines — modularisation into routers/ recommended (carry-over from iter5/7).",
+    "Minor UX: 'Pause 45 min respectée' is shown when driving>0 AND no violation, but the same green label appears even when only one break of exactly 45 covers a single 4h drive — wording is accurate but could be enriched with 'incluant au moins un segment ≥30min' for clarity."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_strict_break_rule.py (new)",
+    "/app/backend/tests/test_double_equipage.py (rewritten to reflect strict logic)"
+  ],
+  "success_rate": {
+    "backend": "100% (70/70 pytest)",
+    "frontend": "100% (5/5 live-indicator scenarios)"
+  },
+  "test_credentials": "admin@routier-facile.fr / Admin123! plus per-run TEST_strict_<uuid>@example.com and TEST_codrv_<uuid>@example.com fresh registrations.",
+  "seed_data_creation": "test_strict_break_rule.py creates a TEST_strict user with up to 70 entries (dates 2026-05-01..) — solo + codriver pairs use date offsets in 10..80 range. test_double_equipage.py creates 2 fresh users (TEST_codrv_*) with 8 entries each on dates 2026-02-15..2026-02-22, plus 2 entries on 2026-03-02/03 for cycle-counter checks. No admin data created during frontend run (used future date 2026-06-15 and did not submit the form).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Strict break rule is locked in /app/backend/server.py compute_break_rule (no double_equipage parameter — flag is informational only). New regression suite: /app/backend/tests/test_strict_break_rule.py. Old co-driver-relaxation test file was rewritten in place to keep the same filename but assert NO algorithmic effect. To run all backend tests: `export REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env | cut -d= -f2) && pytest /app/backend/tests/ -v`. Frontend testids unchanged: breakrule-warning / breakrule-ok / driving-segment-0 / rest-break-0 / add-rest / add-driving."
+}

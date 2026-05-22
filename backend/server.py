@@ -136,14 +136,16 @@ def end_dt(entry: dict) -> datetime:
 
 def compute_break_rule(driving_segments, rest_breaks):
     """
-    EU regulation 561/2006: after 4h30 of accumulated driving the driver must take a
-    break of >=45min, which may be split as 15+30 in this order. This rule applies
-    in both solo and co-driver mode — the 45min relay with the other driver is what
-    resets a fresh 4h30 driving block. (The 30min labour-law break is a separate
-    obligation and is NOT used to reset the 4h30 driving counter.)
-    We assume segments and breaks are interleaved chronologically:
-    drive[0], break[0], drive[1], break[1], ...
-    Returns dict with max_consecutive_driving_minutes and break_rule_status.
+    Strict break validation (EU 561/2006 + Code du travail safeguard):
+    For any working day with driving > 0, BOTH conditions must hold:
+      1. Max consecutive driving never exceeds 4h30 (using cumulative reset when a
+         qualifying 45min pause has been taken — supports the 15+30 split with
+         the 30min segment present).
+      2. Total break duration must be >= 45 min AND include at least one
+         segment >= 30 min.
+    Days with no driving are always 'ok'. double_equipage is stored on the entry
+    for traceability but does NOT relax these thresholds — the 30min Code du
+    travail break is informational, not a 4h30 reset trigger.
     """
     acc_drive = 0
     acc_break = 0
@@ -161,7 +163,16 @@ def compute_break_rule(driving_segments, rest_breaks):
                 acc_drive = 0
                 acc_break = 0
                 has_30_in_window = False
-    status = "violation" if max_acc > MAX_CONSECUTIVE_DRIVING else "ok"
+
+    total_driving = sum(int(x) for x in driving_segments)
+    total_break = sum(int(x) for x in rest_breaks)
+    has_30_overall = any(int(b) >= MIN_SECOND_SPLIT_BREAK for b in rest_breaks)
+
+    violated = (
+        max_acc > MAX_CONSECUTIVE_DRIVING
+        or (total_driving > 0 and (total_break < MIN_QUALIFYING_BREAK or not has_30_overall))
+    )
+    status = "violation" if violated else "ok"
     return {"max_consecutive_driving_minutes": max_acc, "break_rule_status": status}
 
 

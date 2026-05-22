@@ -39,7 +39,12 @@ function computeBreakRule(drivingMins, restMins) {
       }
     }
   }
-  return { maxConsecutive: maxAcc, violation: maxAcc > 4 * 60 + 30 };
+  const totalDriving = drivingMins.reduce((s, x) => s + (x || 0), 0);
+  const totalBreak = restMins.reduce((s, x) => s + (x || 0), 0);
+  const has30 = restMins.some((b) => (b || 0) >= 30);
+  const violation = maxAcc > 4 * 60 + 30
+    || (totalDriving > 0 && (totalBreak < 45 || !has30));
+  return { maxConsecutive: maxAcc, violation };
 }
 
 function makeItem(value = "") {
@@ -119,13 +124,15 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
         )}
         {totals.breakRule.violation && (
           <div className="col-span-2 text-xs text-rf-red flex items-center gap-2" data-testid="breakrule-warning">
-            <span className="rf-status-dot bg-rf-red" /> Règle 4h30 / 45 min non respectée
-            ({minutesToHM(totals.breakRule.maxConsecutive)} sans pause qualifiante)
+            <span className="rf-status-dot bg-rf-red" /> Pause 45 min non respectée
+            {totals.breakRule.maxConsecutive > 4 * 60 + 30 && (
+              <> ({minutesToHM(totals.breakRule.maxConsecutive)} sans pause qualifiante)</>
+            )}
           </div>
         )}
         {!totals.breakRule.violation && totals.driving > 0 && (
           <div className="col-span-2 text-xs text-rf-green flex items-center gap-2" data-testid="breakrule-ok">
-            <span className="rf-status-dot bg-rf-green" /> Règle 4h30 / 45 min respectée
+            <span className="rf-status-dot bg-rf-green" /> Pause 45 min respectée
           </div>
         )}
       </div>
