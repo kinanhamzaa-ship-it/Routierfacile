@@ -23,6 +23,7 @@ export function formatApiError(detail) {
       .filter(Boolean)
       .join(" ");
   }
+  if (detail && typeof detail.message === "string") return detail.message;
   if (detail && typeof detail.msg === "string") return detail.msg;
   return String(detail);
 }

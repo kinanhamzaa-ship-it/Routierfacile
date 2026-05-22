@@ -41,8 +41,13 @@ export default function ComplianceBar({ data }) {
           </div>
           <div className="text-right">
             <div className="rf-label">Jours</div>
-            <div className="font-display text-2xl mt-1" data-testid="cycle-days">
-              {cycle.days_worked}
+            <div
+              className={`font-display text-2xl mt-1 ${
+                cycle.days_worked >= (cycle.days_worked_max || 6) ? "text-rf-orange" : ""
+              }`}
+              data-testid="cycle-days"
+            >
+              {cycle.days_worked}{cycle.days_worked_max ? ` / ${cycle.days_worked_max}` : ""}
             </div>
           </div>
         </div>

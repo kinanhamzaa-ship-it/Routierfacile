@@ -1,0 +1,56 @@
+{
+  "summary": "Iteration 12 — Strict 6-working-day cap per non-leave cycle. Created /app/backend/tests/test_cycle_max_days_cap.py (12 new tests, all PASS) covering every scenario from the review request: 6 entries OK + 7th blocked with structured detail {code:'cycle_max_days_reached', max_days:6, french message}; manual recovery via /api/cycles/start-new AND /api/cycles/confirm-reduced; dashboard exposes cycle.days_worked_max=6 when open and omits it when cycle is null; leave-gap (>=6 inactive days) bypasses the cap and auto-lands in a fresh cycle; boundary gap=5 still blocks; PUT does not increase entry count (cap unaffected); DELETE reduces count then re-add succeeds; repeated blocked attempts are idempotent (no silent cycle creation, no entry leakage). All 29 prior tests in /app/backend/tests/test_leave_cycle.py and test_leave_reconciliation.py still PASS (no regression). Final: 41 PASS, 1 intentional SKIP across the three suites.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_cycle_max_days_cap.py",
+    "/app/test_reports/pytest/iter12_cap.xml",
+    "/app/test_reports/pytest/iter12_regression.xml"
+  ],
+  "tests_executed": [
+    "TestCapEnforcement.test_six_sequential_entries_succeed",
+    "TestCapEnforcement.test_seventh_sequential_entry_returns_structured_400 (detail is dict, code='cycle_max_days_reached', max_days=6, french message)",
+    "TestCapEnforcement.test_blocked_entry_not_persisted (entry list size + cycle counters unchanged after 400)",
+    "TestManualRecovery.test_start_new_then_retry_succeeds_in_fresh_cycle (closed_cycle_id returned; new cycle days_worked=1; previous_cycle.days_worked=6, is_reduced_weekly_rest=false)",
+    "TestManualRecovery.test_confirm_reduced_then_retry_marks_cycle_reduced (previous_cycle.is_reduced_weekly_rest=true)",
+    "TestDashboardDaysWorkedMax.test_days_worked_max_present_when_cycle_open (=6)",
+    "TestDashboardDaysWorkedMax.test_days_worked_max_absent_when_cycle_null",
+    "TestLeaveGapBypassesCap.test_six_entries_then_6day_gap_succeeds_in_fresh_cycle (gap=6 inactive days -> new cycle days_worked=1, leave_period.leave_days>=6)",
+    "TestLeaveGapBypassesCap.test_gap_exactly_5_days_still_blocked (boundary: gap=5 + cycle at 6 entries -> 400)",
+    "TestPutDeleteUnaffected.test_put_on_6entry_cycle_is_allowed (PUT time fields succeeds; count stays 6; persistence verified via GET)",
+    "TestPutDeleteUnaffected.test_delete_then_add_succeeds (delete last entry -> cycle alive at 5; previously blocked date now succeeds)",
+    "TestRepeatedBlockingIsIdempotent.test_multiple_blocked_attempts_dont_corrupt_cycle (3x 400 with stable response; cycle days_worked stays 6)",
+    "Regression: 16/17 in test_leave_cycle.py PASS (1 intentional SKIP, pre-existing)",
+    "Regression: 13/13 in test_leave_reconciliation.py PASS"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Cap is enforced AFTER maybe_close_cycle_on_leave_gap and BEFORE get_or_create_cycle_for_entry — order is correct and verified: long-absence path bypasses the cap because the cycle gets closed first.",
+    "HTTPException detail is a dict and FastAPI serialises it as JSON under {detail:{...}} — response shape matches spec exactly. Verified detail.code, detail.max_days, detail.message in tests.",
+    "French message is hard-coded with f-string interpolation of MAX_DAYS_PER_CYCLE — fine for the single-source-of-truth approach. If i18n becomes a requirement, move to a message catalogue.",
+    "Dashboard returns days_worked_max INSIDE the cycle dict only (not at the top level). When cycle is null the field is absent everywhere — semantically consistent with the spec ('null/no field when cycle is null').",
+    "server.py is now 866 lines — still beyond the 700-line split threshold flagged in iter 10/11. Recommendation persists: split into routers (auth/entries/cycles/summary) + cycle_logic.py module.",
+    "Suggestion (non-blocking): add an idempotency guard on /api/cycles/start-new — currently it returns closed_cycle_id=None silently if there is no open cycle (verified separately in test_leave_cycle.py::test_start_new_when_no_cycle). UX layer should handle that gracefully.",
+    "Detect-and-create_leave_cycle() vs reconcile_leave_cycles() duplication noted in iter 11 still applies — no regression but cleanup recommended."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_cycle_max_days_cap.py (NEW — 12 tests, all PASS)"
+  ],
+  "success_rate": {
+    "backend": "100% — 12/12 new cap tests PASS, 29/29 regression PASS (1 intentional SKIP). Total: 41 PASS / 1 SKIP / 0 FAIL.",
+    "frontend": "not tested (backend-only request)"
+  },
+  "test_credentials": "Each test registers a fresh TEST_cap_<hex>@example.com / Passw0rd! driver via /api/auth/register. Admin: admin@routier-facile.fr / Admin123! (from /app/memory/test_credentials.md, unused this iteration).",
+  "seed_data_creation": "No global seed data. Each test class registers isolated users; data is namespaced per unique user_id. No cleanup performed.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Strict per-cycle 6-day cap is fully covered by /app/backend/tests/test_cycle_max_days_cap.py. Key invariants verified: (1) cap fires only on POST (PUT/DELETE never raise it), (2) error detail is a dict not a string, (3) leave-gap detection runs FIRST so a >=6-day absence bypasses the cap naturally, (4) gap=5 + 6 entries -> 400, gap=6 + 6 entries -> 200 in a fresh cycle, (5) start-new and confirm-reduced both unblock + propagate is_reduced_weekly_rest correctly, (6) days_worked_max=6 surfaces only inside dashboard.cycle. No follow-up testing needed for this feature.",
+  "rca of the issue": "N/A — no issues found. Feature implemented and verified per spec."
+}

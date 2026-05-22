@@ -36,6 +36,7 @@ MAX_CONSECUTIVE_DRIVING = 4 * 60 + 30  # 4h30 before mandatory break
 MIN_QUALIFYING_BREAK = 45  # minutes total to reset driving counter
 MIN_SECOND_SPLIT_BREAK = 30  # at least one break of 30+ min within split
 LEAVE_THRESHOLD_DAYS = 6  # >=6 consecutive inactive days create a leave-period cycle
+MAX_DAYS_PER_CYCLE = 6  # hard cap on working-day entries per (non-leave) cycle
 
 
 def get_jwt_secret() -> str:
@@ -517,6 +518,23 @@ async def create_entry(payload: DailyEntryIn, user: dict = Depends(get_current_u
     # new entry starts a fresh one. The leave-period cycle itself is created by
     # reconcile_leave_cycles at the end of this call.
     await maybe_close_cycle_on_leave_gap(user["id"], payload.date)
+    # Hard cap: a cycle can contain at most MAX_DAYS_PER_CYCLE working days.
+    # If the current open cycle already holds 6 entries, force the user to
+    # start a new cycle manually before adding this one.
+    current_open = await get_current_cycle(user["id"])
+    if current_open:
+        existing_count = await db.entries.count_documents(
+            {"user_id": user["id"], "cycle_id": current_open["id"]}
+        )
+        if existing_count >= MAX_DAYS_PER_CYCLE:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "cycle_max_days_reached",
+                    "message": f"Le cycle en cours contient déjà {MAX_DAYS_PER_CYCLE} journées travaillées (maximum autorisé). Démarrez un nouveau cycle avant d'ajouter cette journée.",
+                    "max_days": MAX_DAYS_PER_CYCLE,
+                },
+            )
     cyc = await get_or_create_cycle_for_entry(user["id"])
     now = datetime.now(timezone.utc).isoformat()
     doc = payload.model_dump()
@@ -755,6 +773,7 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
                 "total_working_minutes": total_working,
                 "total_rest_minutes": total_rest,
                 "days_worked": days,
+                "days_worked_max": MAX_DAYS_PER_CYCLE,
                 "decoucher_count": decoucher_count_cycle,
                 "reduced_rest_used": cyc.get("reduced_rest_used", 0),
                 "reduced_rest_max": 3,
