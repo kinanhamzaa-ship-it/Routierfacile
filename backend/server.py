@@ -334,6 +334,69 @@ async def detect_and_create_leave_cycle(user_id: str, new_entry_date: str) -> Op
     return leave_cyc
 
 
+async def reconcile_leave_cycles(user_id: str):
+    """Re-derive the user's leave-period cycles from the current entries.
+    Leave cycles are a pure projection of gaps >= LEAVE_THRESHOLD_DAYS between
+    consecutive entries:
+      - any stored leave cycle whose covered range no longer matches a current
+        gap is deleted;
+      - any current gap without a matching leave cycle gets one created.
+    Work (non-leave) cycles are NEVER touched here."""
+    entries = await db.entries.find(
+        {"user_id": user_id}, {"_id": 0, "date": 1}
+    ).sort("date", 1).to_list(length=10000)
+
+    valid_gaps = {}  # (leave_start_date, leave_end_date) -> leave_days
+    for i in range(1, len(entries)):
+        py, pm, pd = [int(x) for x in entries[i - 1]["date"].split("-")]
+        cy, cm, cd = [int(x) for x in entries[i]["date"].split("-")]
+        prev_d = date_cls(py, pm, pd)
+        curr_d = date_cls(cy, cm, cd)
+        gap_days = (curr_d - prev_d).days - 1
+        if gap_days >= LEAVE_THRESHOLD_DAYS:
+            start = (prev_d + timedelta(days=1)).isoformat()
+            end = (curr_d - timedelta(days=1)).isoformat()
+            valid_gaps[(start, end)] = gap_days
+
+    existing = await db.cycles.find(
+        {"user_id": user_id, "is_leave_period": True}, {"_id": 0}
+    ).to_list(length=200)
+    existing_keys = set()
+    for lc in existing:
+        key = (lc.get("leave_start_date"), lc.get("leave_end_date"))
+        if key in valid_gaps:
+            existing_keys.add(key)
+        else:
+            await db.cycles.delete_one({"id": lc["id"]})
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for (start, end), days in valid_gaps.items():
+        if (start, end) in existing_keys:
+            continue
+        leave_cyc = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "started_at": start + "T00:00:00+00:00",
+            "ended_at": now_iso,
+            "is_leave_period": True,
+            "leave_days": days,
+            "leave_start_date": start,
+            "leave_end_date": end,
+            "is_reduced_weekly_rest": False,
+            "reduced_rest_used": 0,
+            "extensions_used": 0,
+            "break_violations_count": 0,
+            "total_driving_minutes": 0,
+            "total_working_minutes": 0,
+            "total_rest_minutes": 0,
+            "days_worked": 0,
+            "decoucher_count": 0,
+        }
+        await db.cycles.insert_one(dict(leave_cyc))
+
+
+
+
 async def recompute_cycle_counters(cycle_id: str):
     """Recompute counters and snapshot totals from all entries in cycle."""
     cursor = db.entries.find({"cycle_id": cycle_id}, {"_id": 0})
@@ -491,6 +554,7 @@ async def create_entry(payload: DailyEntryIn, user: dict = Depends(get_current_u
     enrich_entry(doc)
     await db.entries.insert_one(dict(doc))
     await recompute_cycle_counters(cyc["id"])
+    await reconcile_leave_cycles(user["id"])
     return {k: v for k, v in doc.items() if k != "_id"}
 
 
@@ -542,6 +606,7 @@ async def update_entry(entry_id: str, payload: DailyEntryIn, user: dict = Depend
     enrich_entry(merged)
     if existing.get("cycle_id"):
         await recompute_cycle_counters(existing["cycle_id"])
+    await reconcile_leave_cycles(user["id"])
     return merged
 
 
@@ -583,6 +648,7 @@ async def delete_entry(entry_id: str, user: dict = Depends(get_current_user)):
                     )
                     await recompute_cycle_counters(prev["id"])
                     reverted_to_cycle = prev["id"]
+    await reconcile_leave_cycles(user["id"])
     return {
         "ok": True,
         "reverted_to_cycle": reverted_to_cycle,

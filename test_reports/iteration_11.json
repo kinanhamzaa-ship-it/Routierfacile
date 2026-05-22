@@ -1,0 +1,56 @@
+{
+  "summary": "Iteration 11 — Dynamic reconciliation of leave-period cycles. Created /app/backend/tests/test_leave_reconciliation.py (13 new tests, all passing) covering CREATE-fills-gap, UPDATE-shrinks/grows-gap, DELETE-creates-new-gap and DELETE-merges-gap scenarios, plus boundary (gap=5 vs gap=6), stress sequence (5-step add/update/delete chain), and work-cycle-untouched invariants. Also updated 3 obsolete assertions in /app/backend/tests/test_leave_cycle.py to match the new spec (dashboard.previous_cycle now surfaces leave cycles; reconcile runs even on backdating). Final result: 29 passed + 1 intentional skip across the two leave-cycle test files.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_leave_reconciliation.py",
+    "/app/backend/tests/test_leave_cycle.py",
+    "/app/test_reports/pytest/iter11_combined.xml",
+    "/app/test_reports/pytest/iter11_reconciliation.xml"
+  ],
+  "tests_executed": [
+    "TestCreateFillsGap.test_initial_gap_creates_leave_cycle (jan-01,02,15 -> leave 12 days jan-03..jan-14)",
+    "TestCreateFillsGap.test_fill_gap_to_6days_replaces_leave_cycle (add jan-08 -> OLD 12-day cycle deleted, NEW 6-day cycle jan-09..jan-14)",
+    "TestCreateFillsGap.test_fill_gap_below_threshold_deletes_leave_cycle (add jan-11 -> all gaps <6, leave_period=null, previous_cycle falls back to work cycle)",
+    "TestUpdateReconciliation.test_update_shrinks_gap_below_threshold_deletes_leave (PUT moves entry, gap 8->4, leave deleted)",
+    "TestUpdateReconciliation.test_update_grows_gap_above_threshold_creates_leave (PUT moves entry, gap 3->10, leave created)",
+    "TestDeleteReconciliation.test_delete_middle_entry_creates_new_gap (delete middle merges 3+6 -> single 10-day leave)",
+    "TestDeleteReconciliation.test_delete_middle_creates_brand_new_leave (delete jan-10 from {01,10,11} -> leave 9 days)",
+    "TestDeleteReconciliation.test_delete_only_remaining_entry_drops_all_leaves (delete second entry -> 1 entry, no leave)",
+    "TestBoundaries.test_gap_5_never_creates_leave (boundary)",
+    "TestBoundaries.test_gap_6_always_creates_leave (boundary)",
+    "TestStressSequence.test_sequence_invariant_holds (5-step add/update/delete chain, leave_period correct at every step)",
+    "TestWorkCyclesUntouched.test_work_cycle_totals_preserved_after_reconcile (work cycle id and entry.cycle_id preserved)",
+    "TestWorkCyclesUntouched.test_previous_cycle_falls_back_to_work_when_leave_deleted",
+    "All 16 prior tests in /app/backend/tests/test_leave_cycle.py still pass (3 obsolete assertions updated to match new spec)"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "reconcile_leave_cycles() is implemented as a pure projection (delete-stale + insert-missing) — correct and idempotent.",
+    "detect_and_create_leave_cycle() (used inside create_entry) now overlaps with reconcile_leave_cycles() — both can create the same leave cycle on the same call. Reconcile is idempotent so no duplicates occur, but detect_and_create_leave_cycle is now redundant for the new flow; consider removing it in a follow-up to keep one source of truth.",
+    "Reconcile cost: O(N) per write where N = total entries (find().sort + scan). Fine for current scale; if entries grow large, add a (user_id,date) compound index hint or limit to a sliding window.",
+    "server.py reached 870 lines — still beyond the 700-line split threshold flagged in iter 10. Recommend splitting routers (auth/entries/cycles/summary) + a cycle_logic.py module.",
+    "Minor: leave cycles store ended_at = now_iso (the reconcile timestamp), not the calendar end-of-leave date. This is consistent with iter-10 behaviour; dashboard.previous_cycle.ended_at therefore moves forward each time a write triggers reconcile of the SAME leave cycle (delete-then-recreate). UI consumers must rely on leave_start_date / leave_end_date for the canonical period bounds, not ended_at.",
+    "Backdating documentation gap: the inline detect_and_create_leave_cycle() still skips on backdated entries, but reconcile_leave_cycles() runs unconditionally afterwards — so backdating now DOES surface a leave cycle. Update the docstring on detect_and_create_leave_cycle to note that reconcile is the source of truth."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_leave_reconciliation.py (NEW — 13 tests, all PASS)",
+    "/app/backend/tests/test_leave_cycle.py (3 assertions updated to align with the iter-11 spec: previous_cycle may be leave cycle; backdating triggers reconciled leave cycle)"
+  ],
+  "success_rate": {
+    "backend": "100% on leave-cycle suite (29/29 PASS, 1 intentional SKIP) — all 13 dynamic reconciliation scenarios from the review request verified",
+    "frontend": "not tested (backend-only request)"
+  },
+  "test_credentials": "admin@routier-facile.fr / Admin123! (from /app/memory/test_credentials.md). Each test registers a fresh TEST_rec_<hex>@example.com driver via /api/auth/register.",
+  "seed_data_creation": "Each test class registers fresh users; no global seed data. No cleanup performed (data is namespaced per unique user_id).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Dynamic leave-cycle reconciliation is fully covered by /app/backend/tests/test_leave_reconciliation.py. Invariant verified: for entries sorted by date, exactly one leave cycle exists per gap >= 6 days with matching leave_start_date / leave_end_date / leave_days; no other leave cycles exist; work cycles never modified. Boundary at LEAVE_THRESHOLD_DAYS=6 holds. Older /app/backend/tests/test_leave_cycle.py asserted obsolete dashboard.previous_cycle behaviour (previously filtered out leave cycles); 3 assertions were updated this iteration to match the new spec — all tests now pass. Suggested follow-up by main agent: delete the now-redundant detect_and_create_leave_cycle() since reconcile_leave_cycles() is the canonical writer."
+}

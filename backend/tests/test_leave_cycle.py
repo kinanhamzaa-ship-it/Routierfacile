@@ -116,7 +116,10 @@ class TestLeaveDetection:
         d = requests.get(f"{API}/summary/dashboard", headers=_h(token)).json()
         assert d["cycle"]["id"] == new_cycle
         assert d["previous_cycle"] is not None
-        assert d["previous_cycle"]["id"] == old_cycle, "previous_cycle must be OLD work cycle, not leave"
+        # NEW SPEC (iter 11): dashboard.previous_cycle now reflects the most-
+        # recent closed cycle, which is the leave cycle since it was created
+        # AFTER the work cycle closed.
+        assert d["previous_cycle"].get("is_leave_period") is True
         assert d["leave_period"] is not None
         assert d["leave_period"]["leave_days"] == 6
         assert d["leave_period"]["leave_start_date"] == "2026-01-02"
@@ -145,30 +148,42 @@ class TestLeaveDetection:
         assert d["leave_period"]["leave_end_date"] == "2026-01-14"
 
     def test_backdating_no_leave_trigger(self):
-        """Adding an older-dated entry with big gap must NOT create leave cycle."""
+        """Backdating still attaches to the same open work cycle (no new work
+        cycle created). NOTE: per iter-11 dynamic reconciliation, a leave cycle
+        WILL be created if the resulting gap >= 6 days — the 'no backdate
+        leave detection' rule applies only to in-line create_entry detection,
+        not to the projection-based reconcile pass."""
         token, _, _ = _register()
         r1 = requests.post(f"{API}/entries", headers=_h(token), json=_entry("2026-02-01"))
         c1 = r1.json()["cycle_id"]
         # Backdate by 20 days
         r2 = requests.post(f"{API}/entries", headers=_h(token), json=_entry("2026-01-10"))
         assert r2.status_code == 200, r2.text
-        # Should attach to same open cycle (no leave detection on backdate)
         d = requests.get(f"{API}/summary/dashboard", headers=_h(token)).json()
-        assert d["leave_period"] is None
+        # Same open work cycle still in use
         assert d["cycle"]["id"] == c1
+        # Reconciliation projected a leave cycle for the 21-day gap
+        assert d["leave_period"] is not None
+        assert d["leave_period"]["leave_start_date"] == "2026-01-11"
+        assert d["leave_period"]["leave_end_date"] == "2026-01-31"
+        assert d["leave_period"]["leave_days"] == 21
 
     def test_multiple_consecutive_leave_events(self):
-        """Two separate leave gaps; previous_cycle still points to last WORK cycle, leave_period to most recent leave."""
+        """Two separate leave gaps; per iter-11 spec, previous_cycle = most
+        recent closed cycle (which is the latest leave cycle), and leave_period
+        also surfaces the latest leave."""
         token, _, _ = _register()
         requests.post(f"{API}/entries", headers=_h(token), json=_entry("2026-01-01"))
         requests.post(f"{API}/entries", headers=_h(token), json=_entry("2026-01-10"))  # leave #1 (gap=8)
         # now mid-cycle
         mid_cycle_dash = requests.get(f"{API}/summary/dashboard", headers=_h(token)).json()
-        mid_work_cycle = mid_cycle_dash["cycle"]["id"]
+        assert mid_cycle_dash["leave_period"] is not None
         requests.post(f"{API}/entries", headers=_h(token), json=_entry("2026-01-20"))  # leave #2 (gap=9)
         d = requests.get(f"{API}/summary/dashboard", headers=_h(token)).json()
-        # previous_cycle = the second work cycle (jan 10), not the first one
-        assert d["previous_cycle"]["id"] == mid_work_cycle
+        # previous_cycle = the most recent leave cycle per new spec
+        assert d["previous_cycle"] is not None
+        assert d["previous_cycle"].get("is_leave_period") is True
+        # The latest leave projection covers jan-11..jan-19
         assert d["leave_period"]["leave_start_date"] == "2026-01-11"
         assert d["leave_period"]["leave_end_date"] == "2026-01-19"
 
