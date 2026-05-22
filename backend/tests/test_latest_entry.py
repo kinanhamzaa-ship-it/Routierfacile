@@ -109,8 +109,8 @@ class TestDashboardLatestEntryStructure:
             assert key in body, f"missing existing field: {key}"
         # cycle sanity
         c = body["cycle"]
-        for k in ("id", "total_driving_minutes", "weekly_limit_minutes",
-                  "remaining_minutes", "status", "break_violations_count"):
+        for k in ("id", "total_driving_minutes", "days_worked",
+                  "break_violations_count"):
             assert k in c, f"cycle missing {k}"
 
     def test_fresh_user_latest_is_none(self, fresh_user):

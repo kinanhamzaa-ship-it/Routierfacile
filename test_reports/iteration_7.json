@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 7 — Double équipage (co-driver) toggle. Backend: 55/55 pytest PASSED (8 new in test_double_equipage.py + 47 existing, no regressions). Frontend (420x900, admin@routier-facile.fr): section-double-equipage + toggles double-equipage-yes/no present; live breakrule indicator flips from breakrule-warning (red) to breakrule-ok (green) when YES is selected with [4h00,4h00]+[0h30], and back to warning on NO. History shows co-driver-<id> badge with text 'Double équipage' on entries where double_equipage=true. Edit page correctly pre-fills the toggle (YES active, bg-rf-blue) and recomputes the live indicator. All scenarios validated: [240,240]+[30] solo=violation/max=480, codriver=ok/max=240, [240,240]+[20] codriver=violation, [240,240]+[45] codriver=ok. PUT toggle recomputes break_rule_status both directions. Aggregates (amplitude/working/driving/rest) and cycle counters (total_driving_minutes/reduced_rest_used/extensions_used) are unaffected by the toggle.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "EntryForm @ 420x900", "issues": ["The 'Ajouter une période' / 'Ajouter une pause' buttons can sit just above the fixed bottom nav at small viewport widths — clicks intended for those buttons could be intercepted by the bottom-tab bar without scroll. Reproduced once during automation (mis-click navigated away). Functional impact in real use is minimal because the buttons are well within the scrollable area, but consider adding extra bottom padding (pb-20) to the form to guarantee clearance over the fixed nav."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_double_equipage.py",
+    "/app/test_reports/pytest/iter7_codriver.xml",
+    "/app/test_reports/pytest/iter7_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "compute_break_rule in /app/backend/server.py:137-165 correctly threads double_equipage through the qualifying-threshold (45→30) while keeping the 'has_30_in_window' requirement so breaks <30min still don't qualify — algorithm is symmetric with frontend EntryForm.jsx:28-44.",
+    "enrich_entry (server.py:191-195) always reads doc.get('double_equipage', False), so legacy entries without the field default to single-driver behaviour and remain consistent.",
+    "double_equipage is stored as part of the entry via DailyEntryIn (server.py:99). update_entry merges the payload before enrich_entry, so toggling on PUT recomputes break_rule_status — verified end-to-end in test_put_toggle_recomputes_break_rule.",
+    "Frontend EntryForm computeBreakRule mirrors backend logic exactly (threshold = doubleEquipage ? 30 : 45, plus has_30_in_window via `hasHalf`). Good parity.",
+    "History.jsx:115-119 renders the co-driver-<id> badge using rf-blue color matching the Toggle accent. Consistent with the existing badge style (break-violation, ext, legacy).",
+    "Minor: the badge in History uses the `Warning` icon (phosphor) although it's a neutral informational badge. Consider using a 'Users' / 'UserCircle' icon to better convey 'co-driver' rather than a warning sign.",
+    "server.py is now ~633 lines — carry-over from iter5; modularisation into routers/ would help maintainability."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_double_equipage.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (55/55 pytest)",
+    "frontend": "100% on tested flows (live indicator toggle, history co-driver badge, edit pre-fill)"
+  },
+  "test_credentials": "admin@routier-facile.fr / Admin123! plus per-run TEST_codrv_<uuid>@example.com fresh registrations.",
+  "seed_data_creation": "Backend test_double_equipage.py registers a TEST_codrv_<uuid> user per module and creates 7 entries (dates 2026-02-15..2026-02-21) plus a fresh user with 2 entries on 2026-03-02/03 for cycle-counter checks. Frontend verification temporarily created one admin entry on 2026-04-12 (deleted at end of run — admin returned to 4 baseline entries).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All double_equipage scenarios from the review_request are GREEN. Tests live in /app/backend/tests/test_double_equipage.py and rely on a small loader to read REACT_APP_BACKEND_URL from /app/frontend/.env when not exported (older test files still need the env var explicitly: `export REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env | cut -d= -f2)`). New testids confirmed: section-double-equipage, double-equipage-yes, double-equipage-no, co-driver-<id>. Submit button testid is `submit-entry` (not `entry-submit`). UI submit form caveat at 420x900: the 'add' buttons sit close to the bottom fixed nav — scroll into view before clicking add-driving/add-rest in any future Playwright run."
+}

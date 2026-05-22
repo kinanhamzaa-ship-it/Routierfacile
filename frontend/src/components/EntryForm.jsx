@@ -25,8 +25,9 @@ function amplitudeMinutes(start, end) {
   return e - s;
 }
 
-function computeBreakRule(drivingMins, restMins) {
+function computeBreakRule(drivingMins, restMins, doubleEquipage = false) {
   let accDrive = 0, accBreak = 0, hasHalf = false, maxAcc = 0;
+  const threshold = doubleEquipage ? 30 : 45;
   for (let i = 0; i < drivingMins.length; i++) {
     accDrive += drivingMins[i] || 0;
     if (accDrive > maxAcc) maxAcc = accDrive;
@@ -34,7 +35,7 @@ function computeBreakRule(drivingMins, restMins) {
       const b = restMins[i] || 0;
       accBreak += b;
       if (b >= 30) hasHalf = true;
-      if (accBreak >= 45 && hasHalf) {
+      if (accBreak >= threshold && hasHalf) {
         accDrive = 0; accBreak = 0; hasHalf = false;
       }
     }
@@ -65,6 +66,7 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
   const [notes, setNotes] = useState(initial?.notes || "");
   const [decoucher, setDecoucher] = useState(!!initial?.decoucher);
   const [meal, setMeal] = useState(initial?.meal_status || "unsure");
+  const [doubleEquipage, setDoubleEquipage] = useState(!!initial?.double_equipage);
 
   const updateArr = (arr, setArr, id, val) => {
     setArr(arr.map((it) => (it.id === id ? { ...it, value: val } : it)));
@@ -81,9 +83,9 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
     const worked = Math.max(amp - rest, 0);
     const isExtension = driving > 9 * 60 && driving <= 10 * 60;
     const isOverDriving = driving > 10 * 60;
-    const breakRule = computeBreakRule(drivingArr, restArr);
+    const breakRule = computeBreakRule(drivingArr, restArr, doubleEquipage);
     return { driving, rest, amp, worked, isExtension, isOverDriving, breakRule };
-  }, [drivingInputs, restInputs, startTime, endTime]);
+  }, [drivingInputs, restInputs, startTime, endTime, doubleEquipage]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -94,6 +96,7 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
       driving_segments: drivingInputs.map((it) => parseHmToMinutes(it.value)).filter((m) => m > 0),
       rest_breaks: restInputs.map((it) => parseHmToMinutes(it.value)).filter((m) => m > 0),
       departure, arrival, notes, decoucher, meal_status: meal,
+      double_equipage: doubleEquipage,
     });
   };
 
@@ -188,6 +191,16 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
           <div className="flex justify-center text-rf-muted"><ArrowRight size={20} /></div>
           <input data-testid="entry-arrival" value={arrival} onChange={(e) => setArrival(e.target.value)} placeholder="Ville d'arrivée" className="rf-input" />
           <textarea data-testid="entry-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (livraison, retard, cargaison…)" rows={3} className="rf-input" />
+        </div>
+      </Section>
+
+      <Section title="Double équipage" testid="section-double-equipage">
+        <p className="text-xs text-rf-muted mb-3">
+          En double équipage, une pause ≥ 30 min suffit à valider la règle 4h30.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <Toggle testid="double-equipage-yes" active={doubleEquipage} onClick={() => setDoubleEquipage(true)} label="Oui" color="rf-blue" />
+          <Toggle testid="double-equipage-no" active={!doubleEquipage} onClick={() => setDoubleEquipage(false)} label="Non" color="rf-green" />
         </div>
       </Section>
 

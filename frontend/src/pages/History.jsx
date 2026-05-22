@@ -112,6 +112,11 @@ export default function History() {
                     <Warning size={12} /> Extension 10h
                   </span>
                 )}
+                {e.double_equipage && (
+                  <span className="flex items-center gap-1 text-rf-blue" data-testid={`co-driver-${e.id}`}>
+                    <Warning size={12} /> Double équipage
+                  </span>
+                )}
                 {e.decoucher && (
                   <span className="flex items-center gap-1 text-rf-orange">
                     <Bed size={12} /> Découcher

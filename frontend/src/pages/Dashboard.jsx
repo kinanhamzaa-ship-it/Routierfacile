@@ -5,7 +5,7 @@ import ComplianceBar from "../components/ComplianceBar";
 import { useAuth } from "../context/AuthContext";
 import { minutesToHM, formatDateFR, weekdayFR, MONTHS_FR } from "../lib/time";
 import {
-  Plus, SignOut, ForkKnife, Bed, ChartBar, ClipboardText, Clock, Briefcase, Gauge,
+  Plus, SignOut, ForkKnife, Bed, ChartBar, ClipboardText, Clock, Briefcase, Gauge, ArrowsClockwise,
 } from "@phosphor-icons/react";
 
 export default function Dashboard() {
@@ -13,6 +13,7 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [recent, setRecent] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshTick, setRefreshTick] = useState(0);
   const nav = useNavigate();
   const loc = useLocation();
 
@@ -21,7 +22,7 @@ export default function Dashboard() {
     Promise.all([api.get("/summary/dashboard"), api.get("/entries", { params: { limit: 5 } })])
       .then(([d, r]) => { setData(d.data); setRecent(r.data); })
       .finally(() => setLoading(false));
-  }, [loc.key]);
+  }, [loc.key, refreshTick]);
 
   if (loading) {
     return <div className="min-h-[60vh] flex items-center justify-center text-rf-muted">Chargement du tableau de bord…</div>;
@@ -48,9 +49,20 @@ export default function Dashboard() {
             {user?.name || user?.email}
           </h1>
         </div>
-        <button onClick={logout} data-testid="logout-btn" className="rf-btn-ghost flex items-center gap-2 text-sm" aria-label="Se déconnecter">
-          <SignOut size={18} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setRefreshTick((t) => t + 1)}
+            data-testid="refresh-dashboard"
+            className="rf-btn-ghost px-3 py-2"
+            aria-label="Actualiser"
+            title="Actualiser"
+          >
+            <ArrowsClockwise size={18} className={loading ? "animate-spin" : ""} />
+          </button>
+          <button onClick={logout} data-testid="logout-btn" className="rf-btn-ghost flex items-center gap-2 text-sm" aria-label="Se déconnecter">
+            <SignOut size={18} />
+          </button>
+        </div>
       </header>
 
       <div className="px-4 pt-3">

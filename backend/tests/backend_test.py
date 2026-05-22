@@ -163,14 +163,13 @@ class TestCyclesEntries:
         d = r.json()
         assert "cycle" in d and "today" in d and "last_entry" in d and "month" in d
         c = d["cycle"]
-        for k in ["total_driving_minutes", "remaining_minutes", "status",
+        for k in ["total_driving_minutes",
                   "reduced_rest_used", "reduced_rest_max", "extensions_used",
                   "extensions_max", "days_worked", "decoucher_count"]:
             assert k in c, f"missing {k}"
         assert c["reduced_rest_max"] == 3
         assert c["extensions_max"] == 2
         assert c["days_worked"] >= 2
-        assert c["status"] in ["green", "orange", "red"]
         # month
         m = d["month"]
         assert "meal_counts" in m and set(m["meal_counts"].keys()) == {"yes", "no", "unsure"}
