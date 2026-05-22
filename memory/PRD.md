@@ -35,6 +35,18 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
 - Monthly page with Recharts bar chart + PDF export (jsPDF + autoTable).
 - History with full-text search and per-day editing.
 
+## Update v2 (2026-02-XX, Cycle-based compliance)
+- Separated **Amplitude** vs **Heures travaillées** (shown live in form + dashboard + history + PDF).
+- Auto-computed **daily rest** (previous end → current start) with status OK ≥11h, Reduced ≥9h <11h, Warning <9h.
+- **Cycle model** (`cycles` collection): replaces ISO week. Each entry attached to current cycle.
+- Counters per cycle: `reduced_rest_used` (max 3), `extensions_used` (10h driving, max 2).
+- **Weekly rest detection** endpoint `/api/cycles/detect-rest`: signals `weekly_rest_full` (≥45h) or `weekly_rest_reduced` (24–45h). Frontend shows RestDetectionModal — user always confirms.
+- Endpoints: `/api/cycles/current`, `/api/cycles/start-new`, `/api/cycles/confirm-reduced`.
+- Legacy entries (pre-cycle) marked `is_legacy=true`, shown in history with archive badge, excluded from cycle counters.
+- Dashboard "Today" snapshot section with amplitude / worked / driving / rest tiles.
+- History shows full breakdown per entry including coloured `daily_rest_status`.
+- PDF export updated with amplitude + worked + previous rest columns.
+
 ## Backlog (P1/P2)
 - P1: Weekly rest auto-check (≥45h consecutive). Multi-week comparisons.
 - P1: PDF export for arbitrary date range.
