@@ -21,12 +21,14 @@ export function exportMonthlyPdf({ year, month, summary, driverName }) {
   doc.setFontSize(12);
   doc.text("Résumé mensuel", 40, 110);
 
+  const doubleEquipageDays = (summary.entries || []).filter((e) => e.double_equipage).length;
   const stats = [
     ["Jours travaillés", String(summary.working_days)],
     ["Conduite totale", minutesToHM(summary.total_driving_minutes)],
     ["Travail total", minutesToHM(summary.total_working_minutes)],
     ["Pauses & repos", minutesToHM(summary.total_rest_minutes)],
     ["Découcher", String(summary.decoucher_count)],
+    ["Jours en double équipage", String(doubleEquipageDays)],
     ["Repas OUI", String(summary.meal_counts.yes)],
     ["Repas NON", String(summary.meal_counts.no)],
     ["Repas Pas sûr", String(summary.meal_counts.unsure)],
@@ -53,12 +55,14 @@ export function exportMonthlyPdf({ year, month, summary, driverName }) {
     minutesToHM(e.total_rest_minutes),
     e.daily_rest_minutes != null ? minutesToHM(e.daily_rest_minutes) : "N/A",
     e.break_rule_status === "violation" ? "Pause insuf." : "Conforme",
+    e.double_equipage ? "Double" : "Solo",
     `${e.departure || "—"}\n→ ${e.arrival || "—"}`,
     e.decoucher ? "Oui" : "Non",
     e.meal_status === "yes" ? "Oui" : e.meal_status === "no" ? "Non" : "Pas sûr",
   ]);
 
   const breakColIndex = 7;
+  const equipageColIndex = 8;
 
   autoTable(doc, {
     head: [[
@@ -70,6 +74,7 @@ export function exportMonthlyPdf({ year, month, summary, driverName }) {
       "Pauses",
       "Repos journalier",
       "Pause 4h30",
+      "Équipage",
       "Trajet",
       "Découcher",
       "Repas",
@@ -90,16 +95,17 @@ export function exportMonthlyPdf({ year, month, summary, driverName }) {
     styles: { overflow: "linebreak", lineColor: [220, 224, 230], lineWidth: 0.3 },
     columnStyles: {
       0: { cellWidth: 56, halign: "center" },              // Date
-      1: { cellWidth: 64, halign: "center" },              // Horaires
-      2: { cellWidth: 50, halign: "right" },               // Amplitude
-      3: { cellWidth: 50, halign: "right" },               // Travail
-      4: { cellWidth: 50, halign: "right" },               // Conduite
-      5: { cellWidth: 50, halign: "right" },               // Pauses
-      6: { cellWidth: 70, halign: "right" },               // Repos journalier
-      7: { cellWidth: 76, halign: "center", fontStyle: "bold" }, // Pause 4h30
-      8: { cellWidth: 170, halign: "left" },               // Trajet (more room in landscape)
-      9: { cellWidth: 56, halign: "center" },              // Découcher
-      10: { cellWidth: 60, halign: "center" },             // Repas
+      1: { cellWidth: 56, halign: "center" },              // Horaires
+      2: { cellWidth: 48, halign: "right" },               // Amplitude
+      3: { cellWidth: 48, halign: "right" },               // Travail
+      4: { cellWidth: 48, halign: "right" },               // Conduite
+      5: { cellWidth: 48, halign: "right" },               // Pauses
+      6: { cellWidth: 64, halign: "right" },               // Repos journalier
+      7: { cellWidth: 72, halign: "center", fontStyle: "bold" }, // Pause 4h30
+      8: { cellWidth: 54, halign: "center" },              // Équipage
+      9: { cellWidth: 138, halign: "left" },               // Trajet
+      10: { cellWidth: 52, halign: "center" },             // Découcher
+      11: { cellWidth: 50, halign: "center" },             // Repas
     },
     startY: doc.lastAutoTable.finalY + 24,
     margin: { left: 40, right: 40, bottom: 50 },
@@ -112,6 +118,14 @@ export function exportMonthlyPdf({ year, month, summary, driverName }) {
         } else if (val === "Conforme") {
           data.cell.styles.textColor = [22, 101, 52];
           data.cell.styles.fillColor = [220, 252, 231];
+        }
+      }
+      if (data.section === "body" && data.column.index === equipageColIndex) {
+        const val = String(data.cell.raw || "");
+        if (val === "Double") {
+          data.cell.styles.textColor = [29, 78, 216];
+          data.cell.styles.fillColor = [219, 234, 254];
+          data.cell.styles.fontStyle = "bold";
         }
       }
     },
