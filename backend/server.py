@@ -481,7 +481,27 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
 
     today_iso = datetime.now(timezone.utc).date().isoformat()
     today_entry = next((e for e in entries if e["date"] == today_iso), None)
-    last_entry = entries[0] if entries else None
+    last_entry_cycle = entries[0] if entries else None
+
+    # Latest entry across ALL entries (not just current cycle) — used by dashboard snapshot + daily rest tile
+    latest_doc = await db.entries.find_one(
+        {"user_id": user["id"]},
+        {"_id": 0},
+        sort=[("date", -1)]
+    )
+    if latest_doc:
+        # Backfill daily_rest_minutes on the fly for legacy/older entries
+        if latest_doc.get("daily_rest_minutes") is None:
+            prev = await db.entries.find_one(
+                {"user_id": user["id"], "date": {"$lt": latest_doc["date"]}},
+                {"_id": 0}, sort=[("date", -1)]
+            )
+            if prev:
+                latest_doc["daily_rest_minutes"] = max(
+                    int((to_dt(latest_doc["date"], latest_doc["start_time"]) - end_dt(prev)).total_seconds() // 60),
+                    0,
+                )
+        enrich_entry(latest_doc)
 
     # Month stats (calendar month, for meal counters)
     now = datetime.now(timezone.utc).date()
@@ -522,7 +542,8 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
             "break_violations_count": cyc.get("break_violations_count", 0),
         },
         "today": today_entry,
-        "last_entry": last_entry,
+        "last_entry": last_entry_cycle,
+        "latest_entry": latest_doc,
         "month": {
             "year": now.year,
             "month": now.month,

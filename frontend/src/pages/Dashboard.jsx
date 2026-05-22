@@ -28,7 +28,12 @@ export default function Dashboard() {
   }
 
   const cycle = data.cycle;
-  const today = data.today;
+  const latest = data.latest_entry;
+  const todayIsoStr = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const isToday = latest?.date === todayIsoStr;
   const m = data.month;
   const now = new Date();
 
@@ -54,16 +59,45 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {/* Today's snapshot */}
-      {today && (
+      {/* Latest entry snapshot */}
+      {latest && (
         <section className="px-4 pt-6" data-testid="today-section">
-          <div className="rf-label mb-3">Aujourd'hui · {weekdayFR(today.date)}</div>
-          <div className="grid grid-cols-2 gap-3">
-            <SmallTile icon={Clock} label="Amplitude" value={minutesToHM(today.amplitude_minutes)} testid="today-amplitude" />
-            <SmallTile icon={Briefcase} label="Heures travaillées" value={minutesToHM(today.total_working_minutes)} testid="today-worked" />
-            <SmallTile icon={Gauge} label="Conduite" value={minutesToHM(today.total_driving_minutes)} testid="today-driving" color="rf-blue" />
-            <SmallTile icon={Bed} label="Pauses & repos" value={minutesToHM(today.total_rest_minutes)} testid="today-rest" />
+          <div className="rf-label mb-3 flex items-center gap-2">
+            {isToday ? (
+              <>Aujourd'hui · {weekdayFR(latest.date)}</>
+            ) : (
+              <>Dernière journée · {weekdayFR(latest.date)} {formatDateFR(latest.date)}</>
+            )}
+            {latest.is_legacy && (
+              <span className="rf-label text-rf-muted bg-rf-elevated px-1.5 py-0.5 rounded">Archive</span>
+            )}
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <SmallTile icon={Clock} label="Amplitude" value={minutesToHM(latest.amplitude_minutes)} testid="today-amplitude" />
+            <SmallTile icon={Briefcase} label="Heures travaillées" value={minutesToHM(latest.total_working_minutes)} testid="today-worked" />
+            <SmallTile icon={Gauge} label="Conduite" value={minutesToHM(latest.total_driving_minutes)} testid="today-driving" color="rf-blue" />
+            <SmallTile icon={Bed} label="Pauses & repos" value={minutesToHM(latest.total_rest_minutes)} testid="today-rest" />
+          </div>
+          {latest.daily_rest_minutes != null && (
+            <div className="mt-3 rf-tile flex items-center justify-between" data-testid="today-daily-rest">
+              <div>
+                <div className="rf-label">Repos journalier (depuis la veille)</div>
+                <div className={`font-display text-2xl tracking-tight mt-1 text-${
+                  latest.daily_rest_status === "ok" ? "rf-green" :
+                  latest.daily_rest_status === "reduced" ? "rf-orange" : "rf-red"
+                }`}>
+                  {minutesToHM(latest.daily_rest_minutes)}
+                </div>
+              </div>
+              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                latest.daily_rest_status === "ok" ? "bg-rf-green/20 text-rf-green" :
+                latest.daily_rest_status === "reduced" ? "bg-rf-orange/20 text-rf-orange" : "bg-rf-red/20 text-rf-red"
+              }`}>
+                {latest.daily_rest_status === "ok" ? "OK ≥ 11h" :
+                 latest.daily_rest_status === "reduced" ? "Réduit 9-11h" : "< 9h Alerte"}
+              </span>
+            </div>
+          )}
         </section>
       )}
 

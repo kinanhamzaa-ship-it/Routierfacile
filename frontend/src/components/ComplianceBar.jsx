@@ -8,10 +8,10 @@ const colorClass = {
 
 export default function ComplianceBar({ data }) {
   if (!data) return null;
-  const { cycle, last_entry, month } = data;
+  const { cycle, latest_entry, month } = data;
   const pct = Math.min(100, (cycle.total_driving_minutes / cycle.weekly_limit_minutes) * 100);
   const barColor = colorClass[cycle.status];
-  const dailyRestStatus = last_entry?.daily_rest_status || null;
+  const dailyRestStatus = latest_entry?.daily_rest_status || null;
 
   return (
     <div data-testid="compliance-bar" className="sticky top-0 z-30 bg-rf-bg/95 backdrop-blur-md border-b border-rf-border">
@@ -37,7 +37,7 @@ export default function ComplianceBar({ data }) {
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <DailyRestTile status={dailyRestStatus} minutes={last_entry?.daily_rest_minutes} />
+          <DailyRestTile status={dailyRestStatus} minutes={latest_entry?.daily_rest_minutes} />
           <CounterTile
             label="Repos réduits"
             value={cycle.reduced_rest_used}
