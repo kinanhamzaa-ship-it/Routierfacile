@@ -71,8 +71,11 @@ export default function Dashboard() {
         </Link>
       </div>
 
+      {/* Leave period info banner (6+ days inactive) */}
+      {data.leave_period && <LeavePeriodBanner leave={data.leave_period} />}
+
       {/* Previous cycle reference (shown at the start of a new cycle) */}
-      {data.previous_cycle && (
+      {data.previous_cycle && cycle && (
         <PreviousCycleCard prev={data.previous_cycle} current={cycle} />
       )}
 
@@ -242,5 +245,29 @@ function Row({ label, prev, curr, highlight }) {
       <td className="px-3 py-2 text-right tabular-nums">{prev}</td>
       <td className={`px-4 py-2 text-right font-medium tabular-nums ${highlight ? "text-rf-blue" : ""}`}>{curr}</td>
     </tr>
+  );
+}
+
+function LeavePeriodBanner({ leave }) {
+  const fmt = (iso) => {
+    if (!iso) return "—";
+    const [y, m, d] = iso.split("-");
+    return `${d}/${m}/${y}`;
+  };
+  return (
+    <section className="px-4 pt-4" data-testid="leave-period-banner">
+      <div className="rf-card border border-rf-orange/30 bg-rf-orange/5 px-4 py-3 flex items-start gap-3">
+        <Bed size={20} weight="duotone" className="text-rf-orange shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <div className="rf-label text-rf-orange">Période d'absence détectée</div>
+          <div className="font-display text-xl mt-1" data-testid="leave-period-days">
+            {leave.leave_days} jours sans activité
+          </div>
+          <div className="text-[11px] text-rf-muted mt-1">
+            Du {fmt(leave.leave_start_date)} au {fmt(leave.leave_end_date)} · cycle vide enregistré
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }

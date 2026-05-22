@@ -1,0 +1,63 @@
+{
+  "summary": "Iteration 10 — Comprehensive backend validation of the new leave-period cycle feature. Built /app/backend/tests/test_leave_cycle.py with 17 tests (16 PASS, 1 intentionally skipped). All review-request scenarios verified: empty user dashboard never crashes (cycle/previous_cycle/leave_period = null), auto cycle creation on first entry, consecutive entries share cycle, boundary gap_days=5 NO trigger vs gap_days=6 triggers, large gaps (13 days) work correctly, backdating skips leave detection, multiple consecutive leave events behave correctly, delete-last-entry reverts to OLD WORK cycle (skipping leave cycle) and reopens it with ended_at=null & is_reduced_weekly_rest=false, /cycles/current returns null cleanly, /cycles/start-new closes without creating, summary/month + entries CRUD regressions OK.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_leave_cycle.py",
+    "/app/test_reports/pytest/iter10_leave_cycle.xml",
+    "/app/test_reports/pytest/iter10_full.xml"
+  ],
+  "tests_executed": [
+    "test_register_returns_token (token returned, email lowercased)",
+    "test_empty_user_dashboard_no_crash (cycle=null, previous_cycle=null, leave_period=null)",
+    "test_current_cycle_none_when_no_entries",
+    "test_first_entry_creates_cycle (entry.cycle_id matches /cycles/current)",
+    "test_consecutive_entries_same_cycle (3 consecutive days share single cycle)",
+    "test_gap_exactly_6_days_triggers (boundary: jan-01 -> jan-08 creates leave_days=6, new cycle, previous_cycle=OLD work cycle)",
+    "test_gap_exactly_5_days_no_trigger (boundary: jan-01 -> jan-07 stays in same cycle, leave_period=null)",
+    "test_gap_large_triggers (jan-01 -> jan-15: leave_days=13, leave_start=jan-02, leave_end=jan-14)",
+    "test_backdating_no_leave_trigger (older-dated entry with 20-day gap does NOT create leave cycle)",
+    "test_multiple_consecutive_leave_events (previous_cycle = most recent WORK cycle, not earlier one; leave_period = most recent leave)",
+    "test_delete_non_last_keeps_cycle (deleted_empty_cycle=false, reverted_to_cycle=null)",
+    "test_delete_last_entry_with_leave_skips_to_work_cycle (deleted_empty_cycle=true, reverted_to_cycle=OLD work cycle id, reopened with ended_at=null & is_reduced_weekly_rest=false)",
+    "test_start_new_closes_no_new_created (closed_cycle_id present, /cycles/current=null until next entry)",
+    "test_start_new_when_no_cycle (closed_cycle_id=null, no crash)",
+    "test_summary_month_works",
+    "test_entries_crud (POST/GET single/LIST/PUT/DELETE)",
+    "SKIPPED test_delete_last_entry_only_leave_behind_no_revert (requires manual DB seeding to create a state with only a leave cycle behind without a prior work cycle; downstream skip-leave logic already covered by other tests)"
+  ],
+  "pre_existing_test_regressions_not_owned_by_this_iteration": [
+    "/app/backend/tests/backend_test.py uses pytest module-level globals (pytest.entry1_date, pytest.cycle_id) that don't persist across pytest classes -> 6 fails. Also asserts the old behaviour that GET /cycles/current AUTO-CREATES a cycle and that start-new returns a new cycle — both contradict the NEW spec (empty cycles never allowed; start-new only closes). These tests are obsolete and should be deleted or rewritten by main agent.",
+    "/app/backend/tests/test_auto_revert_cycle.py has 3 failures because it calls _start_new_cycle(token) and then subscripts ['id'] on the response — but the new contract returns {'closed_cycle_id': ...} with NO new cycle id. Helper function in the test file needs updating.",
+    "/app/backend/tests/test_cycle_counter_sync.py fails to COLLECT because it reads REACT_APP_BACKEND_URL without a default. Setting REACT_APP_BACKEND_URL env in shell allows collection."
+  ],
+  "action_items": [
+    "(LOW priority, non-blocking) Update or remove the obsolete tests in backend_test.py and test_auto_revert_cycle.py that assume start-new returns a new cycle and that /cycles/current auto-creates a cycle. These tests fail because of legitimate behaviour changes per the new spec (empty cycles never allowed). The new test_leave_cycle.py covers the corrected contract."
+  ],
+  "critical_code_review_comments": [
+    "server.py reached 797 lines — at the recommended 700-line split threshold. Strongly recommend splitting into auth.py / entries.py / cycles.py / summary.py routers + a shared cycle_logic.py module in iteration 11 before adding new features.",
+    "detect_and_create_leave_cycle correctly skips on backdate (later entry exists). However, if a user backdates AFTER a leave cycle was already created, the gap recalculation isn't retro-applied — acceptable per spec but worth a code comment.",
+    "dashboard_summary leave_period filter uses ISO-string compare on ended_at (ok for UTC isoformat). The condition `leave_doc.get('ended_at','') >= prev_cycle_doc.get('ended_at','')` could surface a leave cycle that ended at the exact same instant as the previous work cycle close — extremely unlikely (microsecond resolution) but worth a strict > if ever needed.",
+    "delete_entry: when last entry is removed, previous closed cycle is reopened and is_reduced_weekly_rest reset to False. This silently drops the user's prior 'reduced rest used' flag on revert — confirmed intentional per spec, but worth documenting in the response payload for the frontend.",
+    "Empty leave cycle insertion stores ended_at=now_iso (i.e. the timestamp when the new entry was added) rather than the actual leave_end_date midnight. The leave_period block on dashboard surfaces leave_start_date / leave_end_date correctly, so this is cosmetic — keep an eye if other consumers ever rely on cycle.ended_at to date a leave."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_leave_cycle.py (new, 17 tests)"
+  ],
+  "success_rate": {
+    "backend": "100% on new leave_cycle test file (16/16 passing, 1 intentionally skipped); legacy tests have pre-existing failures due to spec change",
+    "frontend": "not tested (backend-only request)"
+  },
+  "test_credentials": "admin@routier-facile.fr / Admin123! loaded from /app/memory/test_credentials.md; each test registers a fresh TEST_leave_<hex>@example.com driver via /api/auth/register.",
+  "seed_data_creation": "Each test class registers fresh users; emails are lowercased server-side. No cleanup performed (data is namespaced under unique user_ids).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Leave-period feature locked-in by /app/backend/tests/test_leave_cycle.py. Boundary at LEAVE_THRESHOLD_DAYS=6 verified. If new edge cases arise: (1) the only un-tested-by-pytest scenario is 'leave cycle is the only closed cycle behind on delete' which needs manual mongo seeding; (2) consider deleting/refactoring backend_test.py and test_auto_revert_cycle.py as they pre-date the 'empty cycles never allowed' rule and now produce 9 false-positive failures unrelated to current behaviour."
+}

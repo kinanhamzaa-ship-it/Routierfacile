@@ -6,6 +6,25 @@ export default function ComplianceBar({ data }) {
   const { cycle, latest_entry } = data;
   const dailyRestStatus = latest_entry?.daily_rest_status || null;
 
+  if (!cycle) {
+    return (
+      <div data-testid="compliance-bar" className="sticky top-0 z-30 bg-rf-bg/95 backdrop-blur-md border-b border-rf-border">
+        <div className="px-4 pt-4 pb-3">
+          <div className="rf-label">Cycle en cours</div>
+          <div className="flex items-baseline gap-2 mt-1">
+            <Gauge size={20} className="text-rf-muted" weight="duotone" />
+            <span className="font-display text-2xl tracking-tight leading-none text-rf-muted" data-testid="no-cycle-label">
+              Aucun cycle actif
+            </span>
+          </div>
+          <div className="text-[11px] text-rf-muted mt-2">
+            Saisissez une journée pour démarrer un nouveau cycle.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div data-testid="compliance-bar" className="sticky top-0 z-30 bg-rf-bg/95 backdrop-blur-md border-b border-rf-border">
       <div className="px-4 pt-4 pb-3">

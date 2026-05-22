@@ -35,6 +35,7 @@ DAILY_REST_REDUCED = 9 * 60
 MAX_CONSECUTIVE_DRIVING = 4 * 60 + 30  # 4h30 before mandatory break
 MIN_QUALIFYING_BREAK = 45  # minutes total to reset driving counter
 MIN_SECOND_SPLIT_BREAK = 30  # at least one break of 30+ min within split
+LEAVE_THRESHOLD_DAYS = 6  # >=6 consecutive inactive days create a leave-period cycle
 
 
 def get_jwt_secret() -> str:
@@ -275,6 +276,62 @@ async def close_current_cycle(user_id: str, mark_reduced: bool = False) -> Optio
     return res["id"] if res else None
 
 
+async def detect_and_create_leave_cycle(user_id: str, new_entry_date: str) -> Optional[dict]:
+    """If at least LEAVE_THRESHOLD_DAYS full inactive days separate the previous
+    entry from the incoming entry, close the current open cycle and create an
+    empty 'leave-period' cycle covering the entire absence. Returns the leave
+    cycle if created, else None.
+
+    Skipped entirely if the new entry is being back-dated (i.e. any existing
+    entry has a later date) — leave detection must only fire on chronological
+    additions."""
+    later = await db.entries.find_one(
+        {"user_id": user_id, "date": {"$gt": new_entry_date}}, {"_id": 0}
+    )
+    if later:
+        return None
+    prev = await db.entries.find_one(
+        {"user_id": user_id, "date": {"$lt": new_entry_date}},
+        {"_id": 0}, sort=[("date", -1)]
+    )
+    if not prev:
+        return None
+    py, pm, pd = [int(x) for x in prev["date"].split("-")]
+    ny, nm, nd = [int(x) for x in new_entry_date.split("-")]
+    prev_d = date_cls(py, pm, pd)
+    new_d = date_cls(ny, nm, nd)
+    gap_days = (new_d - prev_d).days - 1  # full inactive days between the two
+    if gap_days < LEAVE_THRESHOLD_DAYS:
+        return None
+    # Close the work cycle that prev belongs to (if still open).
+    await close_current_cycle(user_id, mark_reduced=False)
+    leave_start = (prev_d + timedelta(days=1)).isoformat()
+    leave_end = (new_d - timedelta(days=1)).isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    leave_cyc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "started_at": leave_start + "T00:00:00+00:00",
+        "ended_at": now_iso,
+        "is_leave_period": True,
+        "leave_days": gap_days,
+        "leave_start_date": leave_start,
+        "leave_end_date": leave_end,
+        "is_reduced_weekly_rest": False,
+        "reduced_rest_used": 0,
+        "extensions_used": 0,
+        "break_violations_count": 0,
+        "total_driving_minutes": 0,
+        "total_working_minutes": 0,
+        "total_rest_minutes": 0,
+        "days_worked": 0,
+        "decoucher_count": 0,
+    }
+    await db.cycles.insert_one(dict(leave_cyc))
+    leave_cyc.pop("_id", None)
+    return leave_cyc
+
+
 async def recompute_cycle_counters(cycle_id: str):
     """Recompute counters and snapshot totals from all entries in cycle."""
     cursor = db.entries.find({"cycle_id": cycle_id}, {"_id": 0})
@@ -415,6 +472,9 @@ async def create_entry(payload: DailyEntryIn, user: dict = Depends(get_current_u
         prev_end = end_dt(prev)
         new_start = to_dt(payload.date, payload.start_time)
         daily_rest = max(int((new_start - prev_end).total_seconds() // 60), 0)
+    # If a long absence preceded this entry, close the previous cycle and stamp
+    # an empty leave-period cycle covering it before opening the new one.
+    await detect_and_create_leave_cycle(user["id"], payload.date)
     cyc = await get_or_create_cycle_for_entry(user["id"])
     now = datetime.now(timezone.utc).isoformat()
     doc = payload.model_dump()
@@ -506,6 +566,7 @@ async def delete_entry(entry_id: str, user: dict = Depends(get_current_user)):
                         "user_id": user["id"],
                         "id": {"$ne": cycle_id},
                         "ended_at": {"$ne": None},
+                        "is_leave_period": {"$ne": True},
                     },
                     sort=[("ended_at", -1)],
                 )
@@ -569,9 +630,10 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
                 )
         enrich_entry(latest_doc)
 
-    # Previous closed cycle — for visibility/comparison at the start of new cycle
+    # Previous closed cycle — for visibility/comparison at the start of new cycle.
+    # Skip leave-period cycles; we always compare against the last WORK cycle.
     prev_cycle_doc = await db.cycles.find_one(
-        {"user_id": user["id"], "ended_at": {"$ne": None}},
+        {"user_id": user["id"], "ended_at": {"$ne": None}, "is_leave_period": {"$ne": True}},
         {"_id": 0},
         sort=[("ended_at", -1)],
     )
@@ -596,6 +658,24 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
             "break_violations_count": prev_cycle_doc.get("break_violations_count", 0),
         }
 
+    # Latest leave-period cycle (informational gap marker between previous work
+    # cycle and the current one). Surfaced only if it occurred AFTER the previous
+    # work cycle's end — i.e. it sits between previous work cycle and current.
+    leave_doc = await db.cycles.find_one(
+        {"user_id": user["id"], "is_leave_period": True},
+        {"_id": 0},
+        sort=[("ended_at", -1)],
+    )
+    leave_period = None
+    if leave_doc and (not prev_cycle_doc or leave_doc.get("ended_at", "") >= prev_cycle_doc.get("ended_at", "")):
+        leave_period = {
+            "id": leave_doc["id"],
+            "leave_days": leave_doc.get("leave_days", 0),
+            "leave_start_date": leave_doc.get("leave_start_date"),
+            "leave_end_date": leave_doc.get("leave_end_date"),
+            "ended_at": leave_doc.get("ended_at"),
+        }
+
     # Month stats (calendar month, for meal counters)
     now = datetime.now(timezone.utc).date()
     m_start = now.replace(day=1).isoformat()
@@ -616,25 +696,30 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
         driving_month += e["total_driving_minutes"]
 
     return {
-        "cycle": {
-            "id": cyc["id"],
-            "started_at": cyc["started_at"],
-            "is_reduced_weekly_rest": cyc.get("is_reduced_weekly_rest", False),
-            "total_driving_minutes": total_driving,
-            "total_working_minutes": total_working,
-            "total_rest_minutes": total_rest,
-            "days_worked": days,
-            "decoucher_count": decoucher_count_cycle,
-            "reduced_rest_used": cyc.get("reduced_rest_used", 0),
-            "reduced_rest_max": 3,
-            "extensions_used": cyc.get("extensions_used", 0),
-            "extensions_max": 2,
-            "break_violations_count": cyc.get("break_violations_count", 0),
-        },
+        "cycle": (
+            {
+                "id": cyc["id"],
+                "started_at": cyc["started_at"],
+                "is_reduced_weekly_rest": cyc.get("is_reduced_weekly_rest", False),
+                "total_driving_minutes": total_driving,
+                "total_working_minutes": total_working,
+                "total_rest_minutes": total_rest,
+                "days_worked": days,
+                "decoucher_count": decoucher_count_cycle,
+                "reduced_rest_used": cyc.get("reduced_rest_used", 0),
+                "reduced_rest_max": 3,
+                "extensions_used": cyc.get("extensions_used", 0),
+                "extensions_max": 2,
+                "break_violations_count": cyc.get("break_violations_count", 0),
+            }
+            if cyc
+            else None
+        ),
         "today": today_entry,
         "last_entry": last_entry_cycle,
         "latest_entry": latest_doc,
         "previous_cycle": previous_cycle,
+        "leave_period": leave_period,
         "month": {
             "year": now.year,
             "month": now.month,
