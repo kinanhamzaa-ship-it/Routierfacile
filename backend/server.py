@@ -312,6 +312,8 @@ async def detect_and_create_leave_cycle(user_id: str, new_entry_date: str) -> Op
         "id": str(uuid.uuid4()),
         "user_id": user_id,
         "started_at": leave_start + "T00:00:00+00:00",
+        # ended_at uses now_iso so the leave cycle sorts AFTER the work cycle
+        # just closed above — making it the "most recent closed" reference.
         "ended_at": now_iso,
         "is_leave_period": True,
         "leave_days": gap_days,
@@ -631,9 +633,10 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
         enrich_entry(latest_doc)
 
     # Previous closed cycle — for visibility/comparison at the start of new cycle.
-    # Skip leave-period cycles; we always compare against the last WORK cycle.
+    # The most recent closed cycle is used as-is. If it is a leave-period cycle,
+    # its zero totals act as a reset point (showing 0h00 in the comparison table).
     prev_cycle_doc = await db.cycles.find_one(
-        {"user_id": user["id"], "ended_at": {"$ne": None}, "is_leave_period": {"$ne": True}},
+        {"user_id": user["id"], "ended_at": {"$ne": None}},
         {"_id": 0},
         sort=[("ended_at", -1)],
     )
@@ -648,6 +651,10 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
             "started_at": prev_cycle_doc.get("started_at"),
             "ended_at": prev_cycle_doc.get("ended_at"),
             "is_reduced_weekly_rest": prev_cycle_doc.get("is_reduced_weekly_rest", False),
+            "is_leave_period": prev_cycle_doc.get("is_leave_period", False),
+            "leave_start_date": prev_cycle_doc.get("leave_start_date"),
+            "leave_end_date": prev_cycle_doc.get("leave_end_date"),
+            "leave_days": prev_cycle_doc.get("leave_days", 0),
             "total_driving_minutes": prev_cycle_doc.get("total_driving_minutes", 0),
             "total_working_minutes": prev_cycle_doc.get("total_working_minutes", 0),
             "total_rest_minutes": prev_cycle_doc.get("total_rest_minutes", 0),

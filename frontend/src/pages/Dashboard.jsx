@@ -196,16 +196,29 @@ function PreviousCycleCard({ prev, current }) {
     const d = new Date(iso);
     return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
   };
+  const formatDateOnly = (ymd) => {
+    if (!ymd) return "—";
+    const [y, m, d] = ymd.split("-");
+    return `${d}/${m}`;
+  };
   const fmtH = (m) => {
     const h = Math.floor((m || 0) / 60);
     const min = (m || 0) % 60;
     return `${h}h${String(min).padStart(2, "0")}`;
   };
+  const isLeave = prev.is_leave_period;
+  const rangeStart = isLeave ? formatDateOnly(prev.leave_start_date) : formatDate(prev.started_at);
+  const rangeEnd = isLeave ? formatDateOnly(prev.leave_end_date) : formatDate(prev.ended_at);
   return (
     <section className="px-4 pt-5" data-testid="previous-cycle-card">
       <div className="rf-label mb-2 flex items-center gap-2">
         Référence · Cycle précédent
-        {prev.is_reduced_weekly_rest && (
+        {isLeave && (
+          <span className="rf-label text-rf-orange bg-rf-orange/15 px-1.5 py-0.5 rounded">
+            Période d'absence
+          </span>
+        )}
+        {!isLeave && prev.is_reduced_weekly_rest && (
           <span className="rf-label text-rf-orange bg-rf-orange/15 px-1.5 py-0.5 rounded">
             Repos réduit
           </span>
@@ -213,7 +226,7 @@ function PreviousCycleCard({ prev, current }) {
       </div>
       <div className="rf-card overflow-hidden">
         <div className="px-4 py-2.5 text-[11px] text-rf-muted border-b border-rf-border flex items-center justify-between">
-          <span>Du {formatDate(prev.started_at)} au {formatDate(prev.ended_at)}</span>
+          <span>Du {rangeStart} au {rangeEnd}</span>
           <span>{prev.days_worked} j</span>
         </div>
         <table className="w-full text-sm" data-testid="previous-cycle-table">
@@ -232,7 +245,9 @@ function PreviousCycleCard({ prev, current }) {
         </table>
       </div>
       <p className="text-[11px] text-rf-muted mt-2 px-1">
-        Cycle de référence pour rester conforme à la réglementation européenne.
+        {isLeave
+          ? "Période d'absence (≥ 6 jours) — point de remise à zéro pour le cycle actuel."
+          : "Cycle de référence pour rester conforme à la réglementation européenne."}
       </p>
     </section>
   );
