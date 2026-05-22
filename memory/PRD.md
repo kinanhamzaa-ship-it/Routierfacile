@@ -54,10 +54,36 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
 - P2: Multi-driver fleet view for managers.
 - P2: i18n (English).
 - P2: Photo upload for receipts (object storage).
+- P2: Refactor server.py into auth/entries/cycles/summary routers (now ~795 lines).
 - P2: Auto-calculated réglementaire EU (4h30 driving → 45min break).
 - P2: Push reminders end-of-day.
 
+## Update v3 (2026-02, Empty cycles + Leave-period cycles)
+- **No empty cycles** policy enforced: a cycle is created lazily only when a
+  new entry is added, and deleted as soon as its last entry is removed.
+- **Auto-revert** on last-entry delete: the most recent closed WORK cycle is
+  reopened (`ended_at=null`, `is_reduced_weekly_rest=false`). Leave cycles are
+  skipped when reverting.
+- **Dashboard tolerates `cycle=null`**: ComplianceBar renders an "Aucun cycle
+  actif" empty state when no cycle is open; PreviousCycleCard is only shown
+  when both cycle + previous_cycle are present.
+- **NEW Leave-period cycle rule**: when a new entry is added and ≥6 full
+  inactive days separate it from the previous entry, the system:
+  1. Closes the current open work cycle.
+  2. Inserts an empty `is_leave_period: true` cycle covering the entire
+     absence (leave_start_date, leave_end_date, leave_days).
+  3. Opens a fresh new cycle for the new entry.
+- Leave detection is **skipped on back-dating** (entries existing after the
+  new date inhibit the rule).
+- Dashboard exposes `leave_period` (most recent leave cycle between previous
+  work cycle and current cycle) and `previous_cycle` now filters out leave
+  cycles to always compare against the last real work cycle.
+- Frontend: `LeavePeriodBanner` shown above PreviousCycleCard when a leave
+  period exists.
+- Tests: `/app/backend/tests/test_leave_cycle.py` (16 passing) covers the
+  full contract including boundary gap_days=5 vs 6.
+
 ## Next Tasks
-- Run testing subagent end-to-end.
-- Address blocking issues.
-- Deliver MVP screenshot to user.
+- (P1) PWA support (manifest + service worker).
+- (P1) PDF export for custom date ranges.
+- (P2) Refactor server.py into routers.
