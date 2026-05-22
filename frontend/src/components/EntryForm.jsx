@@ -42,19 +42,23 @@ function computeBreakRule(drivingMins, restMins) {
   return { maxConsecutive: maxAcc, violation: maxAcc > 4 * 60 + 30 };
 }
 
+function makeItem(value = "") {
+  return { id: Math.random().toString(36).slice(2) + Date.now().toString(36), value };
+}
+
 export default function EntryForm({ initial, onSubmit, submitting }) {
   const [date, setDate] = useState(initial?.date || todayIso());
   const [startTime, setStartTime] = useState(initial?.start_time || "06:00");
   const [endTime, setEndTime] = useState(initial?.end_time || "18:00");
   const [drivingInputs, setDrivingInputs] = useState(
     initial?.driving_segments?.length
-      ? initial.driving_segments.map((m) => minutesToText(m))
-      : [""]
+      ? initial.driving_segments.map((m) => makeItem(minutesToText(m)))
+      : [makeItem()]
   );
   const [restInputs, setRestInputs] = useState(
     initial?.rest_breaks?.length
-      ? initial.rest_breaks.map((m) => minutesToText(m))
-      : [""]
+      ? initial.rest_breaks.map((m) => makeItem(minutesToText(m)))
+      : [makeItem()]
   );
   const [departure, setDeparture] = useState(initial?.departure || "");
   const [arrival, setArrival] = useState(initial?.arrival || "");
@@ -62,15 +66,15 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
   const [decoucher, setDecoucher] = useState(!!initial?.decoucher);
   const [meal, setMeal] = useState(initial?.meal_status || "unsure");
 
-  const updateArr = (arr, setArr, idx, val) => {
-    const copy = [...arr]; copy[idx] = val; setArr(copy);
+  const updateArr = (arr, setArr, id, val) => {
+    setArr(arr.map((it) => (it.id === id ? { ...it, value: val } : it)));
   };
-  const addItem = (arr, setArr) => setArr([...arr, ""]);
-  const removeItem = (arr, setArr, idx) => setArr(arr.filter((_, i) => i !== idx));
+  const addItem = (arr, setArr) => setArr([...arr, makeItem()]);
+  const removeItem = (arr, setArr, id) => setArr(arr.filter((it) => it.id !== id));
 
   const totals = useMemo(() => {
-    const drivingArr = drivingInputs.map(parseHmToMinutes);
-    const restArr = restInputs.map(parseHmToMinutes);
+    const drivingArr = drivingInputs.map((it) => parseHmToMinutes(it.value));
+    const restArr = restInputs.map((it) => parseHmToMinutes(it.value));
     const driving = drivingArr.reduce((s, x) => s + x, 0);
     const rest = restArr.reduce((s, x) => s + x, 0);
     const amp = amplitudeMinutes(startTime, endTime);
@@ -87,8 +91,8 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
       date,
       start_time: startTime,
       end_time: endTime,
-      driving_segments: drivingInputs.map(parseHmToMinutes).filter((m) => m > 0),
-      rest_breaks: restInputs.map(parseHmToMinutes).filter((m) => m > 0),
+      driving_segments: drivingInputs.map((it) => parseHmToMinutes(it.value)).filter((m) => m > 0),
+      rest_breaks: restInputs.map((it) => parseHmToMinutes(it.value)).filter((m) => m > 0),
       departure, arrival, notes, decoucher, meal_status: meal,
     });
   };
@@ -144,11 +148,11 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
       <Section title="Périodes de conduite" testid="section-driving" accent={minutesToHM(totals.driving)}>
         <p className="text-xs text-rf-muted mb-3">Format : <span className="text-white">4h20</span>, <span className="text-white">3:30</span>, ou minutes</p>
         <div className="space-y-2">
-          {drivingInputs.map((v, i) => (
-            <div key={i} className="flex gap-2">
-              <input data-testid={`driving-segment-${i}`} value={v} onChange={(e) => updateArr(drivingInputs, setDrivingInputs, i, e.target.value)} placeholder="ex: 4h20" className="rf-input flex-1" />
+          {drivingInputs.map((it, i) => (
+            <div key={it.id} className="flex gap-2">
+              <input data-testid={`driving-segment-${i}`} value={it.value} onChange={(e) => updateArr(drivingInputs, setDrivingInputs, it.id, e.target.value)} placeholder="ex: 4h20" className="rf-input flex-1" />
               {drivingInputs.length > 1 && (
-                <button type="button" data-testid={`remove-driving-${i}`} onClick={() => removeItem(drivingInputs, setDrivingInputs, i)} className="rf-btn-ghost px-3" aria-label="Supprimer">
+                <button type="button" data-testid={`remove-driving-${i}`} onClick={() => removeItem(drivingInputs, setDrivingInputs, it.id)} className="rf-btn-ghost px-3" aria-label="Supprimer">
                   <Trash size={18} />
                 </button>
               )}
@@ -162,11 +166,11 @@ export default function EntryForm({ initial, onSubmit, submitting }) {
 
       <Section title="Pauses & repos" testid="section-rest" accent={minutesToHM(totals.rest)}>
         <div className="space-y-2">
-          {restInputs.map((v, i) => (
-            <div key={i} className="flex gap-2">
-              <input data-testid={`rest-break-${i}`} value={v} onChange={(e) => updateArr(restInputs, setRestInputs, i, e.target.value)} placeholder="ex: 45 ou 0h45" className="rf-input flex-1" />
+          {restInputs.map((it, i) => (
+            <div key={it.id} className="flex gap-2">
+              <input data-testid={`rest-break-${i}`} value={it.value} onChange={(e) => updateArr(restInputs, setRestInputs, it.id, e.target.value)} placeholder="ex: 45 ou 0h45" className="rf-input flex-1" />
               {restInputs.length > 1 && (
-                <button type="button" data-testid={`remove-rest-${i}`} onClick={() => removeItem(restInputs, setRestInputs, i)} className="rf-btn-ghost px-3">
+                <button type="button" data-testid={`remove-rest-${i}`} onClick={() => removeItem(restInputs, setRestInputs, it.id)} className="rf-btn-ghost px-3">
                   <Trash size={18} />
                 </button>
               )}

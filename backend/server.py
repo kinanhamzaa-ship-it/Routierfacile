@@ -401,8 +401,10 @@ async def list_entries(user: dict = Depends(get_current_user), start: Optional[s
     q = {"user_id": user["id"]}
     if start or end:
         d = {}
-        if start: d["$gte"] = start
-        if end: d["$lte"] = end
+        if start:
+            d["$gte"] = start
+        if end:
+            d["$lte"] = end
         q["date"] = d
     items = await db.entries.find(q, {"_id": 0}).sort("date", -1).limit(limit).to_list(length=limit)
     for it in items:
@@ -471,12 +473,11 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
     decoucher_count_cycle = sum(1 for e in entries if e.get("decoucher"))
     days = len(entries)
     remaining = max(WEEKLY_DRIVING_LIMIT - total_driving, 0)
+    status = "green"
     if total_driving >= WEEKLY_DRIVING_LIMIT:
         status = "red"
     elif total_driving >= WEEKLY_DRIVING_LIMIT * 0.85:
         status = "orange"
-    else:
-        status = "green"
 
     today_iso = datetime.now(timezone.utc).date().isoformat()
     today_entry = next((e for e in entries if e["date"] == today_iso), None)

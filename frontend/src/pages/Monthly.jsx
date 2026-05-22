@@ -94,7 +94,7 @@ export default function Monthly() {
                       labelStyle={{ color: "#A1A1AA" }}
                     />
                     <Bar dataKey="conduite" name="Conduite (h)" fill="#007AFF" radius={[3, 3, 0, 0]}>
-                      {chartData.map((_, i) => <Cell key={i} />)}
+                      {chartData.map((c) => <Cell key={c.day} />)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
