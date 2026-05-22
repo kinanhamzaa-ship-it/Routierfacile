@@ -26,7 +26,6 @@ app = FastAPI(title="Routier Facile API")
 api_router = APIRouter(prefix="/api")
 
 JWT_ALGORITHM = "HS256"
-WEEKLY_DRIVING_LIMIT = 56 * 60  # minutes
 DAILY_DRIVING_EXTENSION_MIN = 9 * 60  # > 9h triggers extension counter
 DAILY_DRIVING_EXTENSION_MAX = 10 * 60
 WEEKLY_REST_FULL = 45 * 60  # >= 45h => weekly rest
@@ -472,12 +471,6 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
     total_rest = sum(e["total_rest_minutes"] for e in entries)
     decoucher_count_cycle = sum(1 for e in entries if e.get("decoucher"))
     days = len(entries)
-    remaining = max(WEEKLY_DRIVING_LIMIT - total_driving, 0)
-    status = "green"
-    if total_driving >= WEEKLY_DRIVING_LIMIT:
-        status = "red"
-    elif total_driving >= WEEKLY_DRIVING_LIMIT * 0.85:
-        status = "orange"
 
     today_iso = datetime.now(timezone.utc).date().isoformat()
     today_entry = next((e for e in entries if e["date"] == today_iso), None)
@@ -532,9 +525,6 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
             "total_rest_minutes": total_rest,
             "days_worked": days,
             "decoucher_count": decoucher_count_cycle,
-            "weekly_limit_minutes": WEEKLY_DRIVING_LIMIT,
-            "remaining_minutes": remaining,
-            "status": status,
             "reduced_rest_used": cyc.get("reduced_rest_used", 0),
             "reduced_rest_max": 3,
             "extensions_used": cyc.get("extensions_used", 0),

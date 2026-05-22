@@ -1,42 +1,34 @@
 import { minutesToHM } from "../lib/time";
-
-const colorClass = {
-  green: "bg-rf-green",
-  orange: "bg-rf-orange",
-  red: "bg-rf-red",
-};
+import { Gauge } from "@phosphor-icons/react";
 
 export default function ComplianceBar({ data }) {
   if (!data) return null;
-  const { cycle, latest_entry, month } = data;
-  const pct = Math.min(100, (cycle.total_driving_minutes / cycle.weekly_limit_minutes) * 100);
-  const barColor = colorClass[cycle.status];
+  const { cycle, latest_entry } = data;
   const dailyRestStatus = latest_entry?.daily_rest_status || null;
 
   return (
     <div data-testid="compliance-bar" className="sticky top-0 z-30 bg-rf-bg/95 backdrop-blur-md border-b border-rf-border">
       <div className="px-4 pt-4 pb-3">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-3">
           <div>
             <div className="rf-label">Cycle en cours</div>
-            <div className="font-display text-3xl tracking-tight leading-none mt-1">
-              <span data-testid="weekly-driven">{minutesToHM(cycle.total_driving_minutes)}</span>
-              <span className="text-rf-muted text-lg ml-2">/ 56h00</span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <Gauge size={20} className="text-rf-blue" weight="duotone" />
+              <span className="font-display text-3xl tracking-tight leading-none" data-testid="weekly-driven">
+                {minutesToHM(cycle.total_driving_minutes)}
+              </span>
+              <span className="text-rf-muted text-xs uppercase tracking-[0.15em]">conduite</span>
             </div>
           </div>
           <div className="text-right">
-            <div className="rf-label">Restant</div>
-            <div className="font-display text-2xl mt-1" data-testid="weekly-remaining">
-              {minutesToHM(cycle.remaining_minutes)}
+            <div className="rf-label">Jours</div>
+            <div className="font-display text-2xl mt-1" data-testid="cycle-days">
+              {cycle.days_worked}
             </div>
           </div>
         </div>
 
-        <div className="h-2 w-full bg-rf-elevated rounded-full overflow-hidden">
-          <div data-testid="weekly-progress" className={`h-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <DailyRestTile status={dailyRestStatus} minutes={latest_entry?.daily_rest_minutes} />
           <CounterTile
             label="Repos réduits"
