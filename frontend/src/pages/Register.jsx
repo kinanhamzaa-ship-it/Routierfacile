@@ -20,13 +20,13 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <div className="px-6 pt-12 pb-6">
+    <div className="rf-app-min-h-screen flex flex-col rf-safe-top">
+      <div className="px-5 sm:px-6 pt-10 sm:pt-12 pb-6">
         <div className="flex items-center gap-2 text-rf-blue">
           <Truck size={26} weight="duotone" />
           <span className="rf-label text-white">ROUTIER FACILE</span>
         </div>
-        <h1 className="font-display text-5xl tracking-tight mt-4">
+        <h1 className="font-display text-4xl sm:text-5xl tracking-tight mt-4">
           Créer<br />votre compte
         </h1>
         <p className="text-rf-muted mt-3 text-sm">
@@ -34,7 +34,7 @@ export default function Register() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="px-6 py-4 max-w-md mx-auto w-full space-y-5">
+      <form onSubmit={handleSubmit} className="px-5 sm:px-6 py-4 max-w-md mx-auto w-full space-y-5 rf-safe-bottom">
         <div>
           <div className="rf-label mb-2">Prénom (optionnel)</div>
           <input

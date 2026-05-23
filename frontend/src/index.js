@@ -9,3 +9,15 @@ root.render(
     <App />
   </React.StrictMode>,
 );
+
+// PWA: register service worker after the page has loaded so it never blocks
+// the first paint. Only runs over https (or localhost).
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/service-worker.js")
+      .catch(() => {
+        /* swallow: SW is a progressive enhancement */
+      });
+  });
+}

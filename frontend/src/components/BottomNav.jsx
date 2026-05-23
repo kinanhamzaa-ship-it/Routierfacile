@@ -14,7 +14,7 @@ export default function BottomNav() {
   return (
     <nav
       data-testid="bottom-nav"
-      className="fixed bottom-0 left-0 right-0 z-[60] border-t border-rf-border bg-rf-bg/95 backdrop-blur-md"
+      className="fixed bottom-0 left-0 right-0 z-[60] border-t border-rf-border bg-rf-bg/95 backdrop-blur-md rf-safe-bottom"
     >
       <div className="max-w-md mx-auto grid grid-cols-4">
         {items.map((it) => {
@@ -26,7 +26,7 @@ export default function BottomNav() {
               end={it.to === "/"}
               data-testid={it.testid}
               className={({ isActive }) =>
-                `flex flex-col items-center justify-center gap-1 py-3 text-[11px] uppercase tracking-[0.15em] transition-colors ${
+                `flex flex-col items-center justify-center gap-1 py-3 min-h-[56px] text-[11px] uppercase tracking-[0.15em] transition-colors ${
                   isActive ? "text-rf-blue" : "text-rf-muted hover:text-white"
                 }`
               }

@@ -109,6 +109,39 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
   acknowledgement button — manual cycle creation from the UI is gone.
 - Tests: `/app/backend/tests/test_rest_gap_contract.py` (11 PASS) + 41
   prior tests = 52/52 PASS, 0 FAIL.
+
+## Update v6 (2026-02, Mobile-first + PWA)
+- Installable PWA: `manifest.json` (standalone display, portrait, dark theme,
+  `start_url=/`), `service-worker.js` (network-first for HTML, cache-first
+  for static; **never caches `/api/`**), registered after page load so it
+  never blocks first paint.
+- iOS / Android polish: `viewport-fit=cover`, `maximum-scale=1`,
+  `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`,
+  `apple-mobile-web-app-title`, `apple-touch-icon` (180/192/512 PNG icons +
+  maskable 512).
+- Safe-area-inset handling: `BottomNav` uses `rf-safe-bottom`, shell uses
+  `rf-safe-top` + `100dvh`; Emergent badge offset by `env(safe-area-inset-bottom)`.
+- iOS auto-zoom on focus eliminated by enforcing `font-size: 16px` on all
+  inputs/selects/textareas globally.
+- Touch ergonomics: `touch-action: manipulation`, transparent tap-highlight,
+  `min-h-[56px]` on bottom nav tabs, responsive padding `px-5 sm:px-6` on
+  Login/Register.
+- `index.html` title and description updated to "Routier Facile — Carnet de
+  route" so installed PWA shows the right name.
+- No backend changes, no business-logic changes, no breaking test fixtures.
+- `/api/cycles/start-new` and `/api/cycles/confirm-reduced` now REQUIRE a
+  `DetectIn` payload `{date, start_time}` and validate the rest gap from the
+  previous entry's end:
+  - `start-new` requires gap ≥ 45h (full weekly rest).
+  - `confirm-reduced` requires gap ≥ 24h (reduced weekly rest).
+  - Missing payload → 422. Insufficient gap → 400 `{code: "rest_required",
+    message, required_minutes, actual_minutes}`. No previous entry → 400
+    `rest_required` with no metric fields.
+- A new cycle can NEVER be opened without a real, data-detectable rest. The
+  cap modal in `NewEntry` now shows only a single "J'ai compris"
+  acknowledgement button — manual cycle creation from the UI is gone.
+- Tests: `/app/backend/tests/test_rest_gap_contract.py` (11 PASS) + 41
+  prior tests = 52/52 PASS, 0 FAIL.
 - **No empty cycles** policy enforced: a cycle is created lazily only when a
   new entry is added, and deleted as soon as its last entry is removed.
 - **Auto-revert** on last-entry delete: the most recent closed WORK cycle is

@@ -20,28 +20,28 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="rf-app-min-h-screen flex flex-col rf-safe-top">
       <div
-        className="relative h-56 bg-cover bg-center"
+        className="relative h-48 sm:h-56 bg-cover bg-center"
         style={{
           backgroundImage:
             "linear-gradient(180deg, rgba(10,10,10,0.4) 0%, rgba(10,10,10,1) 100%), url('https://images.unsplash.com/photo-1485575301924-6891ef935dcd?crop=entropy&cs=srgb&fm=jpg&q=85')",
         }}
       >
-        <div className="absolute inset-0 flex items-end p-6">
+        <div className="absolute inset-0 flex items-end p-5 sm:p-6">
           <div>
             <div className="flex items-center gap-2 text-rf-blue">
-              <Truck size={28} weight="duotone" />
+              <Truck size={26} weight="duotone" />
               <span className="rf-label text-white">ROUTIER FACILE</span>
             </div>
-            <h1 className="font-display text-5xl tracking-tight mt-2">
+            <h1 className="font-display text-4xl sm:text-5xl tracking-tight mt-2">
               Votre carnet<br />de route
             </h1>
           </div>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex-1 px-6 py-8 max-w-md mx-auto w-full space-y-5">
+      <form onSubmit={handleSubmit} className="flex-1 px-5 sm:px-6 py-8 max-w-md mx-auto w-full space-y-5 rf-safe-bottom">
         <div>
           <div className="rf-label mb-2">Email</div>
           <input

@@ -17,7 +17,7 @@ function Protected({ children }) {
   const loc = useLocation();
   if (user === null)
     return (
-      <div className="min-h-screen flex items-center justify-center text-rf-muted text-sm">
+      <div className="rf-app-min-h-screen flex items-center justify-center text-rf-muted text-sm">
         Chargement…
       </div>
     );
@@ -27,8 +27,8 @@ function Protected({ children }) {
 
 function Shell({ children }) {
   return (
-    <div className="min-h-screen pb-24 rf-grain">
-      <div className="max-w-md mx-auto relative z-10">{children}</div>
+    <div className="rf-app-min-h pb-28 rf-grain rf-safe-top">
+      <div className="max-w-md mx-auto relative z-10 px-0">{children}</div>
       <BottomNav />
     </div>
   );
