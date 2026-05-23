@@ -84,22 +84,31 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
 ## Update v4 (2026-02, Hard cap: 6 working days per cycle)
 - **Hard constraint**: a non-leave cycle MUST contain at most 6 working-day
   entries. The 7th `POST /api/entries` against the same open cycle is
-  **rejected with HTTP 400** and a structured detail body:
-  `{code: "cycle_max_days_reached", message: "<fr>", max_days: 6}`.
-- No auto-split, no implicit cycle creation. The driver must explicitly
-  invoke `/api/cycles/start-new` (or `/api/cycles/confirm-reduced`) and then
-  retry — preserving the EU regulatory intent of a deliberate weekly rest.
+  rejected with HTTP 400 and a structured detail body carrying `code`,
+  `title`, `headline`, `message`, `max_days`.
+- The mandatory-rest wording is fixed: "Le cycle en cours contient déjà 6
+  journées travaillées (maximum autorisé). Vous devez prendre votre repos
+  hebdomadaire obligatoire (normal ou réduit) avant de pouvoir continuer."
 - The leave-gap path (≥ 6 inactive days) closes the current cycle BEFORE the
   cap check, so a long-absence return naturally lands in a fresh cycle.
-- `PUT` and `DELETE` are not affected — they never increase entry count.
-- Dashboard surfaces the cap via `cycle.days_worked_max = 6`. Frontend
-  ComplianceBar now displays `Jours · X / 6` (turns orange at the cap).
-- Frontend `NewEntry` shows a "Limite du cycle atteinte" modal with a
-  one-click "Démarrer un nouveau cycle" button that runs `start-new` and
-  retries the entry automatically.
-- Tests: `/app/backend/tests/test_cycle_max_days_cap.py` (12 PASS) — cap,
-  manual recovery, leave bypass, gap=5 still blocks, PUT/DELETE unaffected,
-  repeated 400s idempotent. 41/41 cycle tests pass overall (no regression).
+- `PUT` and `DELETE` are not affected.
+- Dashboard surfaces the cap via `cycle.days_worked_max = 6`. ComplianceBar
+  displays `Jours · X / 6` (orange at the cap).
+
+## Update v5 (2026-02, Strict EU rest-compliance gate)
+- `/api/cycles/start-new` and `/api/cycles/confirm-reduced` now REQUIRE a
+  `DetectIn` payload `{date, start_time}` and validate the rest gap from the
+  previous entry's end:
+  - `start-new` requires gap ≥ 45h (full weekly rest).
+  - `confirm-reduced` requires gap ≥ 24h (reduced weekly rest).
+  - Missing payload → 422. Insufficient gap → 400 `{code: "rest_required",
+    message, required_minutes, actual_minutes}`. No previous entry → 400
+    `rest_required` with no metric fields.
+- A new cycle can NEVER be opened without a real, data-detectable rest. The
+  cap modal in `NewEntry` now shows only a single "J'ai compris"
+  acknowledgement button — manual cycle creation from the UI is gone.
+- Tests: `/app/backend/tests/test_rest_gap_contract.py` (11 PASS) + 41
+  prior tests = 52/52 PASS, 0 FAIL.
 - **No empty cycles** policy enforced: a cycle is created lazily only when a
   new entry is added, and deleted as soon as its last entry is removed.
 - **Auto-revert** on last-entry delete: the most recent closed WORK cycle is
