@@ -1,0 +1,63 @@
+{
+  "summary": "Iteration 13 — Strict EU rest-gap validation on /api/cycles/start-new + /api/cycles/confirm-reduced, plus new cap error shape (title/headline/message) on POST /api/entries. Rewrote the 4 legacy tests that called start-new/confirm-reduced without a payload (TestManualRecovery x2 in test_cycle_max_days_cap.py + TestCyclesEndpoints x2 in test_leave_cycle.py) to use the new DetectIn contract. Added /app/backend/tests/test_rest_gap_contract.py with 11 new tests covering 422 on missing body, 400 rest_required with required/actual minute fields, exact-45h and exact-24h boundaries, over-fulfilment with 45h gap on confirm-reduced, the new cap error shape including the exact French wording from the user, and the end-to-end flow cap -> detect-rest -> confirm-reduced -> POST /entries in fresh cycle. Final: 52 PASS / 1 SKIP / 0 FAIL across test_rest_gap_contract.py (11) + test_cycle_max_days_cap.py (12) + test_leave_cycle.py (17, 1 skip) + test_leave_reconciliation.py (13). All 41 prior tests still PASS after rewriting the 4 affected ones.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_rest_gap_contract.py",
+    "/app/backend/tests/test_cycle_max_days_cap.py",
+    "/app/backend/tests/test_leave_cycle.py",
+    "/app/test_reports/pytest/iter13_all.xml"
+  ],
+  "tests_executed": [
+    "test_rest_gap_contract.TestStartNewContract.test_no_body_returns_422 -> PASS",
+    "test_rest_gap_contract.TestStartNewContract.test_no_previous_entry_returns_400_rest_required -> PASS",
+    "test_rest_gap_contract.TestStartNewContract.test_insufficient_gap_returns_400_with_metrics (24h gap, required=2700, actual=1440) -> PASS",
+    "test_rest_gap_contract.TestStartNewContract.test_exact_45h_gap_succeeds (Feb 03 16:00 -> Feb 05 13:00) -> PASS",
+    "test_rest_gap_contract.TestConfirmReducedContract.test_no_body_returns_422 -> PASS",
+    "test_rest_gap_contract.TestConfirmReducedContract.test_insufficient_gap_returns_400_rest_required (20h, required=1440, actual=1200) -> PASS",
+    "test_rest_gap_contract.TestConfirmReducedContract.test_24h_gap_succeeds_and_marks_reduced (previous_cycle.is_reduced_weekly_rest=true) -> PASS",
+    "test_rest_gap_contract.TestConfirmReducedContract.test_45h_gap_still_succeeds_and_marks_reduced (over-fulfilment allowed, still marks reduced) -> PASS",
+    "test_rest_gap_contract.TestCapErrorShape.test_cap_error_includes_title_headline_message (title='Limite du cycle atteinte', headline='6 jours travaillés', exact mandatory-rest text, max_days=6) -> PASS",
+    "test_rest_gap_contract.TestEndToEndAfterCap.test_cap_then_detect_rest_then_confirm_reduced_then_post_entry (full E2E flow, fresh cycle days_worked=1, previous marked reduced) -> PASS",
+    "test_rest_gap_contract.TestEndToEndAfterCap.test_bogus_future_datetime_legit_when_gap_valid (server accepts since gap is valid) -> PASS",
+    "Rewritten: test_cycle_max_days_cap.TestManualRecovery.test_start_new_then_retry_succeeds_in_fresh_cycle (now passes {date,start_time} with 45h gap) -> PASS",
+    "Rewritten: test_cycle_max_days_cap.TestManualRecovery.test_confirm_reduced_then_retry_marks_cycle_reduced (24h-gap payload) -> PASS",
+    "Rewritten: test_leave_cycle.TestCyclesEndpoints.test_start_new_closes_no_new_created (45h-gap payload) -> PASS",
+    "Rewritten: test_leave_cycle.TestCyclesEndpoints.test_start_new_when_no_cycle_requires_prev_entry (now expects 400 rest_required) -> PASS",
+    "Regression test_cycle_max_days_cap.py (10 other tests) -> ALL PASS",
+    "Regression test_leave_cycle.py (15 other tests + 1 SKIP) -> ALL PASS",
+    "Regression test_leave_reconciliation.py (13 tests) -> ALL PASS"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_validate_rest_gap helper is correctly shared between start-new (WEEKLY_REST_FULL=2700) and confirm-reduced (WEEKLY_REST_MIN=1440) — single source of truth, well factored.",
+    "rest_required HTTPException detail is a structured dict with code/message/required_minutes/actual_minutes — matches spec exactly. For the no-prev-entry branch, required_minutes/actual_minutes are intentionally omitted (no gap can be computed) — this is consistent with the spec wording.",
+    "Cap error payload now carries title + headline + message + max_days. The wording is hard-coded in French — fine for the current product scope; consider an i18n catalogue if multi-locale is on the roadmap.",
+    "Order of operations in create_entry is preserved: leave-gap detection -> cap check -> cycle creation. The end-to-end test covers the legitimate flow through this ordering.",
+    "server.py is now ~900 lines — modularisation (routers + cycle_logic.py) still recommended; flagged since iter 10, no regression but maintainability cost rising.",
+    "confirm-reduced unconditionally sets is_reduced_weekly_rest=True even on a 45h+ gap (over-fulfilment). The product spec allows this; UX should make clear to the driver that calling confirm-reduced 'spends' a reduced-rest slot regardless of actual gap length.",
+    "Detect-rest endpoint payload (DetectIn) is shared with start-new/confirm-reduced — good reuse. Frontend RestDetectionModal can submit the same payload to all three endpoints without remodeling."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_rest_gap_contract.py (NEW — 11 tests, all PASS)",
+    "/app/backend/tests/test_cycle_max_days_cap.py (rewrote TestManualRecovery 2 tests for new payload contract)",
+    "/app/backend/tests/test_leave_cycle.py (rewrote TestCyclesEndpoints 2 tests for new payload contract)"
+  ],
+  "success_rate": {
+    "backend": "100% — 52/52 PASS, 1 intentional SKIP, 0 FAIL across the 4 relevant suites (11 new + 41 regression).",
+    "frontend": "not tested (backend-only request)"
+  },
+  "test_credentials": "Each test registers a fresh TEST_restgap_<hex>@example.com / Passw0rd! (or TEST_cap_, TEST_leave_) via /api/auth/register. No shared fixtures.",
+  "seed_data_creation": "None — per-test fresh user registration; data is isolated by user_id.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Rest-gap validation contract is fully covered by /app/backend/tests/test_rest_gap_contract.py. Invariants verified: (a) DetectIn payload required (422 on missing body), (b) no-prev-entry path returns 400 rest_required without required/actual minute fields, (c) gap-below-threshold returns 400 with both fields populated, (d) exact boundary values (45h for start-new, 24h for confirm-reduced) succeed, (e) confirm-reduced flags previous_cycle.is_reduced_weekly_rest=true regardless of gap length once threshold met, (f) the cap error JSON now carries title/headline/message/max_days with the exact French wording supplied by the user. Cap error wording is asserted via substring matches on message — adjust the asserts if product copy is rephrased.",
+  "rca of the issue": "N/A — no defects found; feature implemented and verified per spec."
+}

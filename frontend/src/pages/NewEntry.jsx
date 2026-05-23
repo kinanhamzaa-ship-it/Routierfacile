@@ -22,7 +22,12 @@ export default function NewEntry() {
     } catch (e) {
       const detail = e.response?.data?.detail;
       if (detail && typeof detail === "object" && detail.code === "cycle_max_days_reached") {
-        setMaxDaysPrompt({ payload: data, maxDays: detail.max_days, message: detail.message });
+        setMaxDaysPrompt({
+          maxDays: detail.max_days,
+          title: detail.title,
+          headline: detail.headline,
+          message: detail.message,
+        });
       } else {
         toast.error(formatApiError(detail) || "Erreur");
       }
@@ -54,26 +59,17 @@ export default function NewEntry() {
   const confirmDetection = async (action) => {
     // action: "start-new" | "confirm-reduced" | "ignore"
     try {
+      const body = pendingPayload
+        ? { date: pendingPayload.date, start_time: pendingPayload.start_time }
+        : null;
       if (action === "start-new") {
-        await api.post("/cycles/start-new");
+        await api.post("/cycles/start-new", body);
       } else if (action === "confirm-reduced") {
-        await api.post("/cycles/confirm-reduced");
+        await api.post("/cycles/confirm-reduced", body);
       }
       setDetection(null);
       const p = pendingPayload;
       setPendingPayload(null);
-      await persist(p);
-    } catch (e) {
-      toast.error(formatApiError(e.response?.data?.detail) || "Erreur");
-    }
-  };
-
-  const startNewAndRetry = async () => {
-    const p = maxDaysPrompt?.payload;
-    setMaxDaysPrompt(null);
-    if (!p) return;
-    try {
-      await api.post("/cycles/start-new");
       await persist(p);
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail) || "Erreur");
@@ -94,47 +90,37 @@ export default function NewEntry() {
       <EntryForm onSubmit={onSubmit} submitting={submitting} />
       <RestDetectionModal detection={detection} onChoice={confirmDetection} onClose={() => { setDetection(null); setPendingPayload(null); }} />
       {maxDaysPrompt && (
-        <MaxDaysModal
-          message={maxDaysPrompt.message}
-          maxDays={maxDaysPrompt.maxDays}
-          onConfirm={startNewAndRetry}
-          onCancel={() => setMaxDaysPrompt(null)}
-        />
+        <MaxDaysModal prompt={maxDaysPrompt} onClose={() => setMaxDaysPrompt(null)} />
       )}
     </div>
   );
 }
 
-function MaxDaysModal({ message, maxDays, onConfirm, onCancel }) {
+function MaxDaysModal({ prompt, onClose }) {
+  const headline = prompt.headline || `${prompt.maxDays} jours travaillés`;
+  const title = prompt.title || "Limite du cycle atteinte";
   return (
     <div
       data-testid="max-days-modal"
       className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center px-4"
-      onClick={onCancel}
+      onClick={onClose}
     >
       <div
         className="rf-card max-w-md w-full p-5"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="rf-label text-rf-orange">Limite du cycle atteinte</div>
-        <h2 className="font-display text-2xl mt-1">{maxDays} jours travaillés</h2>
-        <p className="text-sm text-rf-muted mt-3">{message}</p>
-        <div className="flex gap-2 mt-5">
-          <button
-            data-testid="max-days-cancel"
-            onClick={onCancel}
-            className="rf-btn-ghost flex-1"
-          >
-            Annuler
-          </button>
-          <button
-            data-testid="max-days-start-new"
-            onClick={onConfirm}
-            className="rf-btn-primary flex-1"
-          >
-            Démarrer un nouveau cycle
-          </button>
-        </div>
+        <div className="rf-label text-rf-orange">{title}</div>
+        <h2 className="font-display text-2xl mt-1" data-testid="max-days-headline">{headline}</h2>
+        <p className="text-sm text-rf-muted mt-3 whitespace-pre-line">
+          {prompt.message}
+        </p>
+        <button
+          data-testid="max-days-acknowledge"
+          onClick={onClose}
+          className="rf-btn-primary w-full mt-5"
+        >
+          J'ai compris
+        </button>
       </div>
     </div>
   );

@@ -486,14 +486,48 @@ async def current_cycle(user: dict = Depends(get_current_user)):
     return cyc  # may be None
 
 
+async def _validate_rest_gap(user_id: str, payload: DetectIn, min_rest_minutes: int, rest_label: str) -> int:
+    """Return the rest gap in minutes between the previous entry's end and
+    the supplied (date, start_time). Raises 400 if no previous entry exists
+    or the gap is below `min_rest_minutes`."""
+    prev = await db.entries.find_one(
+        {"user_id": user_id, "date": {"$lt": payload.date}},
+        {"_id": 0}, sort=[("date", -1)]
+    )
+    if not prev:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "rest_required",
+                "message": "Aucune entrée précédente — un repos hebdomadaire valide doit être détecté dans les données avant de pouvoir clôturer un cycle.",
+            },
+        )
+    prev_end = end_dt(prev)
+    new_start = to_dt(payload.date, payload.start_time)
+    rest_minutes = max(int((new_start - prev_end).total_seconds() // 60), 0)
+    if rest_minutes < min_rest_minutes:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "rest_required",
+                "message": f"Un {rest_label} doit être détecté avant de clôturer ce cycle (gap actuel : {rest_minutes // 60}h{rest_minutes % 60:02d}).",
+                "required_minutes": min_rest_minutes,
+                "actual_minutes": rest_minutes,
+            },
+        )
+    return rest_minutes
+
+
 @api_router.post("/cycles/start-new")
-async def start_new_cycle(user: dict = Depends(get_current_user)):
+async def start_new_cycle(payload: DetectIn, user: dict = Depends(get_current_user)):
+    await _validate_rest_gap(user["id"], payload, WEEKLY_REST_FULL, "repos hebdomadaire complet (≥ 45h)")
     closed_id = await close_current_cycle(user["id"], mark_reduced=False)
     return {"closed_cycle_id": closed_id}
 
 
 @api_router.post("/cycles/confirm-reduced")
-async def confirm_reduced(user: dict = Depends(get_current_user)):
+async def confirm_reduced(payload: DetectIn, user: dict = Depends(get_current_user)):
+    await _validate_rest_gap(user["id"], payload, WEEKLY_REST_MIN, "repos hebdomadaire réduit (≥ 24h)")
     closed_id = await close_current_cycle(user["id"], mark_reduced=True)
     return {"closed_cycle_id": closed_id}
 
@@ -531,7 +565,9 @@ async def create_entry(payload: DailyEntryIn, user: dict = Depends(get_current_u
                 status_code=400,
                 detail={
                     "code": "cycle_max_days_reached",
-                    "message": f"Le cycle en cours contient déjà {MAX_DAYS_PER_CYCLE} journées travaillées (maximum autorisé). Démarrez un nouveau cycle avant d'ajouter cette journée.",
+                    "title": "Limite du cycle atteinte",
+                    "headline": f"{MAX_DAYS_PER_CYCLE} jours travaillés",
+                    "message": f"Le cycle en cours contient déjà {MAX_DAYS_PER_CYCLE} journées travaillées (maximum autorisé). Vous devez prendre votre repos hebdomadaire obligatoire (normal ou réduit) avant de pouvoir continuer.",
                     "max_days": MAX_DAYS_PER_CYCLE,
                 },
             )

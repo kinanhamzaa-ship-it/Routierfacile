@@ -125,25 +125,37 @@ class TestCapEnforcement:
 class TestManualRecovery:
     def test_start_new_then_retry_succeeds_in_fresh_cycle(self):
         token, _, _ = _register()
-        days = _days("2025-02-03", MAX_DAYS + 1)
-        for d in days[:MAX_DAYS]:
+        # 6 entries Feb 03..Feb 08 (each ending 16:00). Last entry ends Feb 08 16:00 UTC.
+        days = _days("2025-02-03", MAX_DAYS)
+        for d in days:
             assert _post_entry(token, d).status_code == 200
         original_cycle = requests.get(f"{API}/cycles/current", headers=_h(token)).json()
         assert original_cycle is not None
         original_cycle_id = original_cycle["id"]
 
-        # 7th blocked
-        r = _post_entry(token, days[MAX_DAYS])
-        assert r.status_code == 400
-        assert r.json()["detail"]["code"] == "cycle_max_days_reached"
+        # 7th blocked at Feb 10 13:00 (45h after Feb 08 16:00)
+        next_date, next_start = "2025-02-10", "13:00"
+        # Try posting first → blocked by cap
+        blocked = requests.post(
+            f"{API}/entries", headers=_h(token),
+            json=_entry(next_date, start=next_start),
+        )
+        assert blocked.status_code == 400
+        assert blocked.json()["detail"]["code"] == "cycle_max_days_reached"
 
-        # Manually start a new cycle
-        s = requests.post(f"{API}/cycles/start-new", headers=_h(token))
+        # Start-new with the 45h-gap payload
+        s = requests.post(
+            f"{API}/cycles/start-new", headers=_h(token),
+            json={"date": next_date, "start_time": next_start},
+        )
         assert s.status_code == 200, s.text
         assert s.json()["closed_cycle_id"] == original_cycle_id
 
-        # Retry — must now succeed
-        r2 = _post_entry(token, days[MAX_DAYS])
+        # Retry — must now succeed in fresh cycle
+        r2 = requests.post(
+            f"{API}/entries", headers=_h(token),
+            json=_entry(next_date, start=next_start),
+        )
         assert r2.status_code == 200, r2.text
 
         # Dashboard: cycle.days_worked=1, previous_cycle.days_worked=6
@@ -158,21 +170,34 @@ class TestManualRecovery:
 
     def test_confirm_reduced_then_retry_marks_cycle_reduced(self):
         token, _, _ = _register()
-        days = _days("2025-02-03", MAX_DAYS + 1)
-        for d in days[:MAX_DAYS]:
+        # 6 entries Feb 03..Feb 08 (each ending 16:00).
+        for d in _days("2025-02-03", MAX_DAYS):
             assert _post_entry(token, d).status_code == 200
         original_cycle_id = requests.get(f"{API}/cycles/current", headers=_h(token)).json()["id"]
 
-        # Blocked
-        assert _post_entry(token, days[MAX_DAYS]).status_code == 400
+        # 24h after Feb 08 16:00 = Feb 09 16:00
+        next_date, next_start = "2025-02-09", "16:00"
 
-        # confirm-reduced
-        s = requests.post(f"{API}/cycles/confirm-reduced", headers=_h(token))
+        # Blocked
+        blocked = requests.post(
+            f"{API}/entries", headers=_h(token),
+            json=_entry(next_date, start=next_start),
+        )
+        assert blocked.status_code == 400
+
+        # confirm-reduced with reduced-rest payload
+        s = requests.post(
+            f"{API}/cycles/confirm-reduced", headers=_h(token),
+            json={"date": next_date, "start_time": next_start},
+        )
         assert s.status_code == 200, s.text
         assert s.json()["closed_cycle_id"] == original_cycle_id
 
         # Retry — succeeds
-        r2 = _post_entry(token, days[MAX_DAYS])
+        r2 = requests.post(
+            f"{API}/entries", headers=_h(token),
+            json=_entry(next_date, start=next_start),
+        )
         assert r2.status_code == 200, r2.text
 
         dash = requests.get(f"{API}/summary/dashboard", headers=_h(token)).json()

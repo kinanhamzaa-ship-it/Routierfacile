@@ -238,23 +238,34 @@ class TestDeleteRevert:
 class TestCyclesEndpoints:
     def test_start_new_closes_no_new_created(self):
         token, _, _ = _register()
+        # Entry Mar 01 ending 16:00. Need 45h gap -> Mar 03 13:00.
         requests.post(f"{API}/entries", headers=_h(token), json=_entry("2026-03-01"))
-        r = requests.post(f"{API}/cycles/start-new", headers=_h(token))
-        assert r.status_code == 200
+        r = requests.post(
+            f"{API}/cycles/start-new", headers=_h(token),
+            json={"date": "2026-03-03", "start_time": "13:00"},
+        )
+        assert r.status_code == 200, r.text
         assert r.json()["closed_cycle_id"] is not None
         # No open cycle until next entry
         cur = requests.get(f"{API}/cycles/current", headers=_h(token)).json()
         assert cur is None
         # Next entry creates a fresh cycle
-        e = requests.post(f"{API}/entries", headers=_h(token), json=_entry("2026-03-02")).json()
+        e = requests.post(
+            f"{API}/entries", headers=_h(token),
+            json=_entry("2026-03-03", start="13:00"),
+        ).json()
         cur2 = requests.get(f"{API}/cycles/current", headers=_h(token)).json()
         assert cur2 and cur2["id"] == e["cycle_id"]
 
-    def test_start_new_when_no_cycle(self):
+    def test_start_new_when_no_cycle_requires_prev_entry(self):
+        """New contract: start-new with no previous entry must return 400 rest_required."""
         token, _, _ = _register()
-        r = requests.post(f"{API}/cycles/start-new", headers=_h(token))
-        assert r.status_code == 200
-        assert r.json()["closed_cycle_id"] is None
+        r = requests.post(
+            f"{API}/cycles/start-new", headers=_h(token),
+            json={"date": "2026-03-03", "start_time": "13:00"},
+        )
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"]["code"] == "rest_required"
 
 
 # ============= EXISTING ENDPOINTS REGRESSION =============
