@@ -6,6 +6,17 @@ import { useAuth } from "../context/AuthContext";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { DownloadSimple, CaretLeft, CaretRight } from "@phosphor-icons/react";
 
+// Stable references for Recharts props so the chart doesn't re-render the
+// tooltip and bar layers on every parent render.
+const TOOLTIP_CONTENT_STYLE = {
+  background: "#141414",
+  border: "1px solid #27272A",
+  borderRadius: 8,
+  color: "#fff",
+};
+const TOOLTIP_LABEL_STYLE = { color: "#A1A1AA" };
+const BAR_RADIUS = [3, 3, 0, 0];
+
 export default function Monthly() {
   const { user } = useAuth();
   const now = new Date();
@@ -90,10 +101,10 @@ export default function Monthly() {
                     <XAxis dataKey="day" stroke="#A1A1AA" fontSize={11} />
                     <YAxis stroke="#A1A1AA" fontSize={11} />
                     <Tooltip
-                      contentStyle={{ background: "#141414", border: "1px solid #27272A", borderRadius: 8, color: "#fff" }}
-                      labelStyle={{ color: "#A1A1AA" }}
+                      contentStyle={TOOLTIP_CONTENT_STYLE}
+                      labelStyle={TOOLTIP_LABEL_STYLE}
                     />
-                    <Bar dataKey="conduite" name="Conduite (h)" fill="#007AFF" radius={[3, 3, 0, 0]}>
+                    <Bar dataKey="conduite" name="Conduite (h)" fill="#007AFF" radius={BAR_RADIUS}>
                       {chartData.map((c) => <Cell key={c.day} />)}
                     </Bar>
                   </BarChart>

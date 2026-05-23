@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import api, { formatApiError } from "../lib/api";
 
 const AuthCtx = createContext(null);
@@ -22,7 +22,7 @@ export function AuthProvider({ children }) {
       });
   }, []);
 
-  const login = async (email, password) => {
+  const login = useCallback(async (email, password) => {
     setError("");
     try {
       const { data } = await api.post("/auth/login", { email, password });
@@ -33,9 +33,9 @@ export function AuthProvider({ children }) {
       setError(formatApiError(e.response?.data?.detail) || e.message);
       return false;
     }
-  };
+  }, []);
 
-  const register = async (email, password, name) => {
+  const register = useCallback(async (email, password, name) => {
     setError("");
     try {
       const { data } = await api.post("/auth/register", { email, password, name });
@@ -46,9 +46,9 @@ export function AuthProvider({ children }) {
       setError(formatApiError(e.response?.data?.detail) || e.message);
       return false;
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await api.post("/auth/logout");
     } catch (err) {
@@ -56,13 +56,14 @@ export function AuthProvider({ children }) {
     }
     localStorage.removeItem("rf_token");
     setUser(false);
-  };
+  }, []);
 
-  return (
-    <AuthCtx.Provider value={{ user, login, register, logout, error, setError }}>
-      {children}
-    </AuthCtx.Provider>
+  const value = useMemo(
+    () => ({ user, login, register, logout, error, setError }),
+    [user, login, register, logout, error]
   );
+
+  return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
 
 export const useAuth = () => useContext(AuthCtx);
