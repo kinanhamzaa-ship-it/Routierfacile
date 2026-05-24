@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 15 — Forgot-password + Reset-password + Delete-account + Emergent-branding-removal features. BACKEND: 12/12 new tests in test_forgot_password_and_delete.py PASS (forgot generic-200 on unknown email, forgot creates HMAC-SHA256 hashed token doc, 60s cooldown does not rotate, reset 200 + old-pwd-401 + new-pwd-200, invalid token 400 code='invalid_or_expired_token', single-use second call 400, short password 422, DELETE /auth/me wrong-pwd 403 code='invalid_password', correct-pwd 200 with deleted_entries/deleted_cycles + Mongo purge of users+entries+cycles+email_verification_tokens+password_reset_tokens, old JWT 401, email re-registration succeeds with email_verified=false, unauthenticated 401). REGRESSION: 70 passed + 1 skipped across test_email_verification, test_email_verification_extra, test_leave_cycle, test_leave_reconciliation, test_cycle_max_days_cap, test_rest_gap_contract — full regression intact. FRONTEND: Login forgot-password link, /forgot-password page + forgot-sent-message, /reset-password (no-token error + valid-token success → reset-goto-login), login with new pwd → /dashboard → account-link → /account → email shown → delete-confirm-modal → wrong-pwd shows 'Mot de passe incorrect.' inline error → correct pwd deletes & redirects to /login. EMERGENT BRANDING removed: #emergent-badge count=0 and 'Made with Emergent' text=false on /login, /forgot-password, /verify-email, /dashboard, /account; a[href*='emergent.sh'] count=0 on all those pages. Admin (admin@routier-facile.fr / Admin123!) login still returns 200.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_forgot_password_and_delete.py",
+    "/app/test_reports/pytest/iter15_forgot_delete.xml",
+    "/app/test_reports/pytest/iter15_regression.xml"
+  ],
+  "tests_executed": [
+    "BACKEND forgot-password unknown email → 200 'Si un compte existe' — PASS",
+    "BACKEND forgot-password known email → 200 + password_reset_tokens doc with HMAC token_hash (raw not in DB) — PASS",
+    "BACKEND forgot-password within 60s cooldown → token_hash unchanged — PASS",
+    "BACKEND reset-password valid token → 200 ok=true; old pwd 401; new pwd 200 — PASS",
+    "BACKEND reset-password invalid token → 400 detail.code='invalid_or_expired_token' — PASS",
+    "BACKEND reset-password single-use (2nd call 400) — PASS",
+    "BACKEND reset-password new_password<6 → 422 — PASS",
+    "BACKEND DELETE /auth/me unauthenticated → 401 — PASS",
+    "BACKEND DELETE /auth/me wrong password → 403 detail.code='invalid_password' — PASS",
+    "BACKEND DELETE /auth/me correct password → 200 ok=true + deleted_entries/deleted_cycles + Mongo purge of users/entries/cycles/email_verification_tokens/password_reset_tokens — PASS",
+    "BACKEND After delete old JWT → GET /auth/me 401 — PASS",
+    "BACKEND After delete same email re-registers with email_verified=false — PASS",
+    "REGRESSION test_email_verification.py (13), test_email_verification_extra.py (5), test_leave_cycle.py (16+1 skip), test_leave_reconciliation.py (13), test_cycle_max_days_cap.py (12), test_rest_gap_contract.py (11) → 70 passed, 1 skipped, 0 failed",
+    "FRONTEND /login shows data-testid=link-forgot-password ('Mot de passe oublié ?') — PASS",
+    "FRONTEND Click forgot → /forgot-password (data-testid=forgot-password-page) → submit unknown email → data-testid=forgot-sent-message visible — PASS",
+    "FRONTEND /reset-password (no token) → error state with data-testid=reset-request-new — PASS",
+    "FRONTEND /reset-password?token=<valid> → form (data-testid=reset-password-input) → submit matching pwds → data-testid=reset-goto-login visible (success) — PASS",
+    "FRONTEND Login with new pwd → /dashboard renders with data-testid=account-link icon — PASS",
+    "FRONTEND Click account-link → /account → data-testid=account-email shows the user's email — PASS",
+    "FRONTEND data-testid=delete-account-open → opens data-testid=delete-confirm-modal requiring password — PASS",
+    "FRONTEND Delete with wrong password → data-testid=delete-confirm-error visible with 'Mot de passe incorrect.' — PASS",
+    "FRONTEND Delete with correct password → redirected to /login — PASS",
+    "FRONTEND #emergent-badge count=0, a[href*='emergent.sh'] count=0, and 'Made with Emergent' text NOT in DOM on /login, /forgot-password, /verify-email, /dashboard, /account — PASS",
+    "ADMIN admin@routier-facile.fr / Admin123! login → 200 — PASS (credentials still valid)"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Security model for password reset is solid: HMAC-SHA256 hash at rest (verified via Mongo — token_hash != raw token observed in backend log), 1h TTL via Mongo expireAfterSeconds=0 (implicit via TTL on expires_at field — covered by single-use + invalid-after-consume tests), single-use (doc deleted on consume), 60s cooldown (token_hash unchanged on rapid repeat), and generic 'Si un compte existe' response prevents email enumeration.",
+    "DELETE /auth/me uses request body with JSON {password} and returns purge counts — clean implementation. Verified that ALL related collections (users, entries, cycles, email_verification_tokens, password_reset_tokens) are wiped, and that the JWT becomes unusable while the email can be re-registered (email_verified=false reset).",
+    "Emergent branding removal is complete and defensively guarded by CSS (#emergent-badge and a[href*='emergent.sh'] display:none in index.css). Confirmed 0 occurrences across all 5 audited routes.",
+    "SMTP no-op fallback logs the reset URL with the RAW token at WARNING level — fine for preview/CI but ensure production logs (Render) filter/redact this to avoid token leakage via log aggregation. Same concern was flagged for verify-email tokens in iter14 — still applies.",
+    "server.py file size keeps growing (now includes new helpers create_password_reset_token/consume_password_reset_token/send_password_reset_email + 3 new endpoints around line ~700). Modularising into routers/services is overdue; flagged in iters 13–14 still applicable.",
+    "ResetPassword.jsx unlike VerifyEmail.jsx does NOT have the same React.StrictMode side-effect-on-mount issue because the POST is gated behind explicit form submit (user action) — verified by reset flow succeeding end-to-end in the browser.",
+    "Account.jsx delete confirmation modal correctly clears state, redirects to /login, and clears auth cookie/localStorage — verified by post-delete /login landing with no auth state."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "100% — 12/12 new + 70/70 regression PASS (1 pre-existing skip in test_leave_cycle)", "frontend": "100% — all 10 audited E2E flows PASS, no Emergent branding detected" },
+  "test_credentials": "Admin: admin@routier-facile.fr / Admin123! (verified still working). Per-test fresh users registered via /api/auth/register + email_verified flipped in Mongo by conftest.register_verified_user helper.",
+  "seed_data_creation": "None persistent — every test creates and deletes its own user. Backend tests use TEST_/test_ prefixes; frontend tests use test_fe_fp_/test_fe_del_ prefixes.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 3 features (forgot/reset password, delete account, Emergent branding removal) are FULLY VERIFIED end-to-end (backend pytest + frontend Playwright). The previous iteration's VerifyEmail.jsx StrictMode double-fire bug is OUT OF SCOPE for this iteration; if main agent fixed it separately, it can be re-tested by tailing backend.err.log for a fresh verify-email?token URL and opening it. To regenerate a reset token for manual testing: `tail -n 200 /var/log/supervisor/backend.err.log | grep -o 'reset-password?token=[^ ]*'` after a /api/auth/forgot-password POST. The delete endpoint expects DELETE with a JSON body — use `requests.request('DELETE', url, json={'password': ...})` (verified working in test_forgot_password_and_delete.py::TestDeleteAccount).",
+  "rca of the issue": "N/A — no defects found in this iteration. The transient 'login_ok timeout' observed in the Playwright run was a wait_for_url matcher false-negative (page actually navigated to /dashboard and rendered correctly with the user's FE greeting and account-link button visible in screenshot); all subsequent dependent assertions on /dashboard and /account succeeded, confirming login completed normally."
+}

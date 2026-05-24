@@ -5,7 +5,7 @@ import ComplianceBar from "../components/ComplianceBar";
 import { useAuth } from "../context/AuthContext";
 import { minutesToHM, formatDateFR, weekdayFR, MONTHS_FR } from "../lib/time";
 import {
-  Plus, SignOut, ForkKnife, Bed, ChartBar, ClipboardText, Clock, Briefcase, Gauge, ArrowsClockwise,
+  Plus, SignOut, ForkKnife, Bed, ChartBar, ClipboardText, Clock, Briefcase, Gauge, ArrowsClockwise, UserGear,
 } from "@phosphor-icons/react";
 
 export default function Dashboard() {
@@ -59,6 +59,15 @@ export default function Dashboard() {
           >
             <ArrowsClockwise size={18} className={loading ? "animate-spin" : ""} />
           </button>
+          <Link
+            to="/account"
+            data-testid="account-link"
+            className="rf-btn-ghost flex items-center gap-2 text-sm"
+            aria-label="Mon compte"
+            title="Mon compte"
+          >
+            <UserGear size={18} />
+          </Link>
           <button onClick={logout} data-testid="logout-btn" className="rf-btn-ghost flex items-center gap-2 text-sm" aria-label="Se déconnecter">
             <SignOut size={18} />
           </button>

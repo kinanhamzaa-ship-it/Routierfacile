@@ -4,6 +4,11 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import VerifyPending from "./pages/VerifyPending";
+import VerifyEmail from "./pages/VerifyEmail";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
+import Account from "./pages/Account";
 import Dashboard from "./pages/Dashboard";
 import NewEntry from "./pages/NewEntry";
 import EditEntry from "./pages/EditEntry";
@@ -42,6 +47,18 @@ function Router() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/verify-pending" element={<VerifyPending />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+      <Route
+        path="/account"
+        element={
+          <Protected>
+            <Shell><Account /></Shell>
+          </Protected>
+        }
+      />
       <Route
         path="/"
         element={

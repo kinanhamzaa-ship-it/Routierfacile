@@ -23,11 +23,8 @@ API = f"{BASE_URL}/api"
 
 
 def _register():
-    email = f"TEST_leave_{uuid.uuid4().hex[:8]}@example.com"
-    r = requests.post(f"{API}/auth/register", json={"email": email, "password": "Passw0rd!", "name": "Leave Test"})
-    assert r.status_code == 200, r.text
-    data = r.json()
-    return data["token"], data["user"]["id"], email
+    from conftest import register_verified_user
+    return register_verified_user(name="Leave Test")
 
 
 def _h(token):

@@ -111,6 +111,49 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
   prior tests = 52/52 PASS, 0 FAIL.
 
 ## Update v6 (2026-02, Mobile-first + PWA)
+- Installable PWA: `manifest.json` (standalone, portrait, dark theme, app
+  icons 192/512 + maskable + 180 Apple touch) and a lightweight
+  `service-worker.js` registered post-load. SW caches the app shell + static
+  assets but **never** caches `/api/` calls.
+- iOS / Android meta tags: `viewport-fit=cover`, `maximum-scale=1`,
+  `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`,
+  `apple-mobile-web-app-title`, `apple-touch-icon`.
+- Safe-area-inset handling: BottomNav uses `env(safe-area-inset-bottom)`,
+  shell uses `100dvh` + `rf-safe-top`.
+- iOS auto-zoom on focus eliminated by enforcing `font-size: 16px` globally
+  for `input/select/textarea`.
+- Touch ergonomics: `touch-action: manipulation`, transparent tap-highlight,
+  `min-h-[56px]` on bottom nav tabs, responsive padding on Login/Register.
+
+## Update v7 (2026-02, Email verification via Brevo SMTP)
+- `/auth/register` no longer auto-logs in: returns `{email, email_verified:false, message}`. Verification email sent (24h-TTL single-use token, HMAC-SHA256 at rest, TTL index on `expires_at`).
+- `/auth/login` returns 403 `{code:"email_not_verified", message, email}` until verified.
+- New endpoints: `POST /auth/verify-email`, `POST /auth/resend-verification` (generic 200, 60s cooldown, no enumeration).
+- Backfill: existing users without `email_verified` field get `false` on startup. Admin is the only system-managed exception (auto-verified).
+- Mail transport: stdlib `smtplib` in `asyncio.to_thread`. SSL 465 / STARTTLS 587. When SMTP env vars unset → logged WARNING no-op with the URL.
+- Frontend: `/verify-pending`, `/verify-email?token=...`, resend block on `/login`. `VerifyEmail` guarded with `useRef` against StrictMode double-fire.
+
+## Update v8 (2026-02, Forgot password + Delete account + No Emergent branding)
+- **Forgot password**: `POST /auth/forgot-password {email}` (generic 200,
+  no enumeration, 60s cooldown) and `POST /auth/reset-password {token,
+  new_password}`. Tokens HMAC-SHA256-hashed at rest, **1h TTL** via Mongo
+  `expireAfterSeconds=0`, single-use. New frontend pages `/forgot-password`
+  and `/reset-password`; "Mot de passe oublié ?" link on `/login`.
+- **Delete account**: `DELETE /auth/me {password}` requires the current
+  password for confirmation. Returns 403 `{code:"invalid_password"}` on
+  mismatch, 200 with `{deleted_entries, deleted_cycles}` on success. Purges
+  the user doc + entries + cycles + email_verification_tokens +
+  password_reset_tokens, and clears the auth cookie. New `/account` page
+  with a "Zone dangereuse" delete confirmation modal; reachable from the
+  Dashboard via a `UserGear` icon.
+- **Emergent branding removed**: dropped the inline `#emergent-badge`
+  anchor and the `emergent-main.js` CDN script from `index.html`. Defensive
+  CSS hides any future re-injection (`#emergent-badge, a[href*="emergent.sh"]
+  { display: none !important }`). Verified 0 occurrences on /login,
+  /dashboard, /account, /verify-email, /forgot-password.
+- Tests: `/app/backend/tests/test_forgot_password_and_delete.py` (12 PASS,
+  including HMAC hash check, cooldown, single-use, full account purge with
+  Mongo inspection). **Regression: 70/70 prior tests still PASS.**
 - Installable PWA: `manifest.json` (standalone display, portrait, dark theme,
   `start_url=/`), `service-worker.js` (network-first for HTML, cache-first
   for static; **never caches `/api/`**), registered after page load so it

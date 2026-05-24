@@ -1,0 +1,70 @@
+{
+  "summary": "Iteration 14 — Email verification feature (Brevo SMTP). Backend: 13/13 test_email_verification.py PASS + 5/5 new test_email_verification_extra.py PASS (SMTP-not-configured log fallback, admin auto-verified login, TTL index on expires_at, manually-expired token rejection, post-cooldown token rotation). Regression: 52/52 prior tests (test_leave_cycle + test_leave_reconciliation + test_cycle_max_days_cap + test_rest_gap_contract) still PASS via the new shared conftest.py register_verified_user helper. Frontend: register → /verify-pending OK, unverified login shows the exact French message + resend block OK, /verify-email without token shows error state OK. CRITICAL BUG FOUND on /verify-email?token=<valid>: UI shows error state ('Lien invalide') even though the user IS actually verified in MongoDB — caused by React.StrictMode double-invoking the verify useEffect in dev/preview, first call consumes the single-use token (result discarded by cancelled flag), second call gets 400 and overwrites state to error. Verified via Mongo inspection: users.email_verified=true and email_verification_tokens count=0 for the test user.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "VerifyEmail.jsx (/verify-email?token=)",
+        "issue": "React.StrictMode double-fires useEffect in dev/preview; the verify-email endpoint is single-use. First POST succeeds (token consumed, user.email_verified=true in DB) but result is discarded by the `cancelled` flag; second POST returns 400 'invalid_or_expired_token' and that DOES set status='error'. Result: the UI shows 'Lien invalide / Échec de la vérification' even though verification actually succeeded. Confirmed by inspecting MongoDB after the click. Curl with the same token correctly returns 200 once and 400 the second time, which proves the backend is fine — the bug is purely client-side double-invocation.",
+        "selector": "[data-testid=\"verify-error\"] (wrongly displayed instead of verify-success)",
+        "priority": "HIGH",
+        "fix_suggestion": "Guard the POST with a useRef so it fires once across StrictMode remounts, e.g. `const ranRef = useRef(false); useEffect(() => { if (ranRef.current) return; ranRef.current = true; api.post(...) }, [token]);`. Alternatively, also accept 400/already-verified as success when the user already shows email_verified=true (call /api/auth/me on 400 to confirm)."
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Register → /verify-email?token=... → /login → /dashboard",
+        "issue": "Cannot complete the happy path in the browser due to the StrictMode bug above. End-to-end verified successfully via direct API curl + DB inspection: backend behaviour is correct; only the React effect double-call breaks the UX.",
+        "affected_selectors": ["[data-testid=\"verify-success\"]", "[data-testid=\"verify-goto-login\"]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_email_verification.py",
+    "/app/backend/tests/test_email_verification_extra.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/iter14_email_verification.xml",
+    "/app/test_reports/pytest/iter14_email_extra.xml",
+    "/app/test_reports/pytest/iter14_regression.xml"
+  ],
+  "tests_executed": [
+    "BACKEND register contract (no token / no user, email_verified=false in DB, duplicate 400) — 3 PASS",
+    "BACKEND login gating (unverified 403 french message+code+email; verified 200 with token) — 2 PASS",
+    "BACKEND verify-email (valid token 200, invalid 400 with code, single-use second call 400, raw token never in DB) — 4 PASS",
+    "BACKEND resend (unknown email generic 200, verified account generic 200 no new token, within-60s cooldown no rotation) — 3 PASS",
+    "BACKEND backfill (legacy user without email_verified field is 403 email_not_verified after backfill update) — 1 PASS",
+    "EXTRA SMTP no-op log contains 'SMTP not configured' + verify-email?token= URL — 1 PASS",
+    "EXTRA admin@routier-facile.fr / Admin123! login → 200 with user.email_verified=true — 1 PASS",
+    "EXTRA email_verification_tokens collection has TTL index on expires_at (expireAfterSeconds=0) — 1 PASS",
+    "EXTRA manually-expired token doc → verify-email returns 400 invalid_or_expired_token — 1 PASS",
+    "EXTRA after 60s cooldown (created_at backdated) resend rotates token_hash — 1 PASS",
+    "REGRESSION test_leave_cycle.py (16 PASS, 1 SKIP), test_leave_reconciliation.py (13 PASS), test_cycle_max_days_cap.py (12 PASS), test_rest_gap_contract.py (11 PASS) — 52 PASS / 1 SKIP",
+    "FRONTEND register → /verify-pending shows email + resend button (data-testid=verify-pending-page,verify-pending-email,resend-verification-btn) — PASS",
+    "FRONTEND /login with unverified creds shows French message + resend-verification-block (data-testid=resend-verification-block,resend-verification-btn) — PASS",
+    "FRONTEND /verify-email without token shows verify-error state — PASS",
+    "FRONTEND /verify-email?token=<valid> → should show verify-success but shows verify-error due to StrictMode double-fire bug (user IS verified in DB) — FAIL"
+  ],
+  "action_items": [
+    "FIX VerifyEmail.jsx: guard the verify POST against React.StrictMode double-invocation. Use a useRef boolean (or move the call out of useEffect into a one-shot module-level promise keyed by token). After the fix, manually retest the full register→verify-email link→login→dashboard flow in the browser.",
+    "Optional hardening: when verify-email returns 400 invalid_or_expired_token, call /api/auth/me (or otherwise check) and if user is already verified, show success instead of error — this gives idempotency for users who click the link twice from their mailbox."
+  ],
+  "critical_code_review_comments": [
+    "Email verification security model is solid: HMAC-SHA256 hash at rest (verified), 24h TTL via Mongo expireAfterSeconds=0, single-use (token doc deleted on consume), 60s cooldown enforced via created_at gating, generic resend response prevents enumeration. All observed in tests + direct DB inspection.",
+    "Startup backfill (users without email_verified → false) is correctly enforced — legacy account login is rejected with code=email_not_verified.",
+    "SMTP no-op fallback logs the verification URL at WARNING level with the email recipient — fine for preview/CI, but the link in the log is the RAW token. Make sure production logging level filters this out OR sanitises the token in prod log aggregation.",
+    "VerifyEmail.jsx is NOT StrictMode-safe: single-use side-effect inside useEffect without a ref guard. This is the only material defect found — see action_items.",
+    "Frontend resendVerification in AuthContext + the Login resend block + the VerifyPending page all wire up correctly and use the right data-testid attributes for E2E coverage.",
+    "server.py is now ~1100+ lines (per the original PR note) — modularisation into routers/ + services/ is overdue; flagged in earlier iterations, still applicable."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_email_verification_extra.py (NEW — 5 tests covering SMTP log, admin, TTL index, expired token rejection, cooldown rotation)"
+  ],
+  "success_rate": { "backend": "100% — 70/70 PASS, 1 SKIP, 0 FAIL", "frontend": "75% — 3/4 critical flows OK; /verify-email success state broken by StrictMode" },
+  "test_credentials": "Admin: admin@routier-facile.fr / Admin123!. Tests register fresh TEST_ev_<hex>@example.com / Passw0rd! per test.",
+  "seed_data_creation": "None — per-test fresh users; helper register_verified_user in conftest.py flips email_verified=True directly via pymongo.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The ONLY remaining defect is in /app/frontend/src/pages/VerifyEmail.jsx — React.StrictMode double-invokes the verify POST, second call gets 400 (single-use), state ends in 'error'. Backend is fully verified (13 dedicated + 5 extra + 52 regression = 70/70 PASS). To reproduce the FE bug: register a fresh user via UI, tail /var/log/supervisor/backend.err.log for the raw token, open /verify-email?token=<raw> in the preview URL, observe verify-error displayed while `db.users.find({email}).email_verified` is true and `email_verification_tokens` is empty. Fix is a useRef guard or move the call out of useEffect. After fix, end-to-end test register→verify-link→login→dashboard.",
+  "rca of the issue": "ROOT CAUSE: VerifyEmail.jsx's POST to /api/auth/verify-email lives inside a useEffect with only a `cancelled` boolean. React.StrictMode (enabled in /app/frontend/src/index.js) mounts→unmounts→remounts the component in dev/preview, firing the effect twice. The first effect's cancelled flag prevents the success state update, but it does NOT cancel the in-flight HTTP request — the backend consumes the single-use token and returns 200 (user is now email_verified=true). The second effect's POST hits the now-empty tokens collection and returns 400 invalid_or_expired_token; this second response IS applied to state, producing the misleading 'Lien invalide' UI. Backend is behaving correctly; the contract is single-use by design. MITIGATION: guard with a useRef boolean so the POST fires once per token value, OR change the catch handler to treat 'invalid_or_expired_token' as success when a subsequent /auth/me indicates the account is already verified. Recommended primary fix: useRef guard (smaller surface, no extra API call)."
+}

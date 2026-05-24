@@ -111,8 +111,10 @@ input[type="number"] { -moz-appearance: textfield; }
 .rf-app-min-h   { min-height: 100vh; min-height: 100dvh; }
 .rf-app-min-h-screen { min-height: 100vh; min-height: 100dvh; }
 
-/* Lift Emergent dev badge above the sticky bottom nav so it doesn't block taps */
-#emergent-badge {
-  bottom: calc(84px + env(safe-area-inset-bottom)) !important;
-  z-index: 70 !important;
+/* Hide any Emergent badge if it gets re-injected (we removed the inline
+   markup; this is defense-in-depth so it never appears to end users). */
+#emergent-badge,
+[id*="emergent-badge"],
+a[href*="emergent.sh"] {
+  display: none !important;
 }
