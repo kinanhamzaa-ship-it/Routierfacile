@@ -272,7 +272,11 @@ def _verification_html_body(verify_url: str, name: Optional[str]) -> str:
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
 
-
+def _frontend_base_url() -> str:
+    """Public frontend base URL used to build verification + reset links."""
+    url = os.environ.get("FRONTEND_URL", "").strip() or os.environ.get("APP_BASE_URL", "").strip()
+    return url.rstrip("/")
+    
 async def send_verification_email(to_email: str, raw_token: str, name: Optional[str]) -> bool:
     """Send the email-verification link using the unified Brevo flow."""
     return await _send_transactional_email(
