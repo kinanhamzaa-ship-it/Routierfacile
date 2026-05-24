@@ -111,6 +111,54 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
   prior tests = 52/52 PASS, 0 FAIL.
 
 ## Update v6 (2026-02, Mobile-first + PWA)
+- Installable PWA: `manifest.json` (standalone, portrait, dark theme, app
+  icons 192/512 + maskable + 180 Apple touch) and a lightweight
+  `service-worker.js` registered post-load. SW caches the app shell + static
+  assets but **never** caches `/api/` calls.
+- iOS / Android meta tags: `viewport-fit=cover`, `maximum-scale=1`,
+  `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`,
+  `apple-mobile-web-app-title`, `apple-touch-icon`.
+- Safe-area-inset handling: BottomNav uses `env(safe-area-inset-bottom)`,
+  shell uses `100dvh` + `rf-safe-top`.
+- iOS auto-zoom on focus eliminated by enforcing `font-size: 16px` globally
+  for `input/select/textarea`.
+- Touch ergonomics: `touch-action: manipulation`, transparent tap-highlight,
+  `min-h-[56px]` on bottom nav tabs, responsive padding on Login/Register.
+
+## Update v7 (2026-02, Email verification via Brevo SMTP)
+- `/auth/register` no longer auto-logs in: returns
+  `{email, email_verified:false, message}`. A verification email is sent
+  containing a 24h-TTL single-use token.
+- Tokens are stored as **HMAC-SHA256 hash** of the raw value, keyed with
+  `JWT_SECRET`. The raw value is never in MongoDB. MongoDB TTL index on
+  `expires_at` auto-purges expired tokens.
+- `/auth/login` returns **403** when the user is not verified:
+  `{code:"email_not_verified", message:"Veuillez vérifier votre adresse e-mail avant de vous connecter.", email}`.
+- New endpoints:
+  - `POST /auth/verify-email {token}` → consumes the token, flips
+    `email_verified=true`. Single-use; second call returns 400.
+  - `POST /auth/resend-verification {email}` → always returns the same
+    generic 200 to prevent email enumeration. 60s cooldown per user.
+- **Startup backfill**: any existing user without the `email_verified`
+  field is set to `false`. Existing accounts MUST verify on next login.
+- The seeded admin (`admin@routier-facile.fr`) is the only system-managed
+  account and is auto-verified at startup (its mailbox doesn't accept mail).
+- Mail transport: stdlib `smtplib` run inside `asyncio.to_thread`. SSL on
+  port 465, STARTTLS on 587. When SMTP env vars are unset (preview/CI), the
+  sender is a logged WARNING no-op (verification URL written to the backend
+  log so devs can copy it). Production sets `SMTP_HOST/PORT/USER/PASS` and
+  `MAIL_FROM` in Render env.
+- Frontend: new pages `/verify-pending` (post-register "check your email"
+  with resend) and `/verify-email?token=...` (validates, shows success or
+  error with retry link). Login page shows the French message + a resend
+  block when login is blocked by `email_not_verified`. `VerifyEmail` uses a
+  `useRef` guard so React.StrictMode's double-mount doesn't double-consume
+  the single-use token.
+- Tests: 13 in `test_email_verification.py` + 5 in
+  `test_email_verification_extra.py` (SMTP no-op log, admin auto-verified,
+  TTL index present, manually expired token, post-cooldown rotation) = 18
+  new PASS. Regression: 52/52 prior tests still PASS via the new shared
+  `conftest.py::register_verified_user` helper.
 - Installable PWA: `manifest.json` (standalone display, portrait, dark theme,
   `start_url=/`), `service-worker.js` (network-first for HTML, cache-first
   for static; **never caches `/api/`**), registered after page load so it

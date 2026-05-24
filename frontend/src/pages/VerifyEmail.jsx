@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api, { formatApiError } from "../lib/api";
 import { CheckCircle, WarningCircle, Spinner } from "@phosphor-icons/react";
@@ -9,6 +9,11 @@ export default function VerifyEmail() {
   const [status, setStatus] = useState("loading"); // loading | success | error
   const [errorMsg, setErrorMsg] = useState("");
   const nav = useNavigate();
+  // The verify-email endpoint is single-use. React.StrictMode double-fires
+  // useEffect in dev/preview — without this ref the second call would always
+  // see a consumed token and flip the UI to error. We pin to the token value
+  // so a genuine user navigation with a new token still fires.
+  const submittedTokenRef = useRef(null);
 
   useEffect(() => {
     if (!token) {
@@ -16,22 +21,16 @@ export default function VerifyEmail() {
       setErrorMsg("Aucun jeton de vérification fourni.");
       return;
     }
-    let cancelled = false;
+    if (submittedTokenRef.current === token) return;
+    submittedTokenRef.current = token;
     api
       .post("/auth/verify-email", { token })
-      .then(() => {
-        if (cancelled) return;
-        setStatus("success");
-      })
+      .then(() => setStatus("success"))
       .catch((e) => {
-        if (cancelled) return;
         const detail = e.response?.data?.detail;
         setStatus("error");
         setErrorMsg(formatApiError(detail) || "Lien de vérification invalide ou expiré.");
       });
-    return () => {
-      cancelled = true;
-    };
   }, [token]);
 
   return (
