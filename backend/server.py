@@ -191,9 +191,60 @@ async def _send_brevo_email(
     return True
 
 
-def _verification_email_bodies(verify_url: str, name: Optional[str]) -> tuple[str, str]:
+async def _send_transactional_email(
+    to_email: str,
+    name: Optional[str],
+    raw_token: str,
+    *,
+    path: str,  # "/verify-email" | "/reset-password"
+    subject: str,
+    text_body_builder,  # callable(url, name) -> str
+    html_body_builder,  # callable(url, name) -> str
+    log_label: str,
+) -> bool:
+    """Single canonical send path for ALL transactional emails (verification,
+    reset, future ones). By construction, every transactional flow goes
+    through the same code — there is no possible drift between them."""
+    base_url = _frontend_base_url()
+    if not base_url:
+        logging.error(
+            "[brevo:%s] FRONTEND_URL/APP_BASE_URL not configured — cannot build link for %s",
+            log_label, to_email,
+        )
+        return False
+    link = f"{base_url}{path}?token={raw_token}"
+    if not os.environ.get("BREVO_API_KEY", "").strip():
+        logging.warning(
+            "[brevo:%s] BREVO_API_KEY not configured — would send to %s | link=%s",
+            log_label, to_email, link,
+        )
+        return False
+    text_body = text_body_builder(link, name)
+    html_body = html_body_builder(link, name)
+    logging.info(
+        "[brevo:%s] dispatching transactional email to=%s link=%s",
+        log_label, to_email, link,
+    )
+    try:
+        return await _send_brevo_email(
+            to_email=to_email,
+            subject=subject,
+            text_body=text_body,
+            html_body=html_body,
+            recipient_name=name,
+            log_label=log_label,
+        )
+    except Exception as exc:
+        logging.exception(
+            "[brevo:%s] unexpected failure sending to %s: %s",
+            log_label, to_email, exc,
+        )
+        return False
+
+
+def _verification_text_body(verify_url: str, name: Optional[str]) -> str:
     greeting = f"Bonjour {name}," if name else "Bonjour,"
-    text_body = (
+    return (
         f"{greeting}\n\n"
         "Bienvenue sur Routier Facile. Pour activer votre compte, "
         "veuillez vérifier votre adresse e-mail en ouvrant le lien ci-dessous :\n\n"
@@ -202,7 +253,11 @@ def _verification_email_bodies(verify_url: str, name: Optional[str]) -> tuple[st
         "Si vous n'êtes pas à l'origine de cette inscription, ignorez cet e-mail.\n\n"
         "— Routier Facile"
     )
-    html_body = f"""<!doctype html>
+
+
+def _verification_html_body(verify_url: str, name: Optional[str]) -> str:
+    greeting = f"Bonjour {name}," if name else "Bonjour,"
+    return f"""<!doctype html>
 <html><body style="font-family:system-ui,-apple-system,sans-serif;background:#0A0A0A;color:#fff;padding:24px;">
   <div style="max-width:520px;margin:0 auto;background:#141414;border:1px solid #27272A;border-radius:8px;padding:24px;">
     <h1 style="font-family:'Barlow Condensed',sans-serif;font-size:28px;margin:0 0 12px;color:#fff;">Routier Facile</h1>
@@ -218,42 +273,20 @@ def _verification_email_bodies(verify_url: str, name: Optional[str]) -> tuple[st
     <p style="color:#A1A1AA;font-size:12px;margin-top:24px;">Ce lien expire dans {EMAIL_VERIFICATION_TTL_HOURS}h. Si vous n'êtes pas à l'origine de cette inscription, ignorez cet e-mail.</p>
   </div>
 </body></html>"""
-    return text_body, html_body
 
 
 async def send_verification_email(to_email: str, raw_token: str, name: Optional[str]) -> bool:
-    base_url = _frontend_base_url()
-    if not base_url:
-        logging.error(
-            "[brevo:verification] FRONTEND_URL/APP_BASE_URL not configured — cannot build link for %s",
-            to_email,
-        )
-        return False
-    verify_url = f"{base_url}/verify-email?token={raw_token}"
-    # Dev/preview no-op so devs can still grab the link from the backend log
-    # when BREVO_API_KEY is unset.
-    if not os.environ.get("BREVO_API_KEY", "").strip():
-        logging.warning(
-            "[brevo:verification] BREVO_API_KEY not configured — would send to %s | link=%s",
-            to_email, verify_url,
-        )
-        return False
-    text_body, html_body = _verification_email_bodies(verify_url, name)
-    try:
-        return await _send_brevo_email(
-            to_email=to_email,
-            subject="Vérifiez votre adresse e-mail — Routier Facile",
-            text_body=text_body,
-            html_body=html_body,
-            recipient_name=name,
-            log_label="verification",
-        )
-    except Exception as exc:
-        logging.exception(
-            "[brevo:verification] unexpected failure sending to %s: %s",
-            to_email, exc,
-        )
-        return False
+    """Send the email-verification link. Uses the EXACT same Brevo HTTP API
+    code path as `send_password_reset_email` (both go through
+    `_send_transactional_email` → `_send_brevo_email`)."""
+    return await _send_transactional_email(
+        to_email=to_email, name=name, raw_token=raw_token,
+        path="/verify-email",
+        subject="Vérifiez votre adresse e-mail — Routier Facile",
+        text_body_builder=_verification_text_body,
+        html_body_builder=_verification_html_body,
+        log_label="verification",
+    )
 
 
 # ============================================================
@@ -291,9 +324,9 @@ async def consume_password_reset_token(raw_token: str) -> Optional[str]:
     return doc.get("user_id")
 
 
-def _password_reset_email_bodies(reset_url: str, name: Optional[str]) -> tuple[str, str]:
+def _reset_text_body(reset_url: str, name: Optional[str]) -> str:
     greeting = f"Bonjour {name}," if name else "Bonjour,"
-    text_body = (
+    return (
         f"{greeting}\n\n"
         "Vous avez demandé à réinitialiser votre mot de passe sur Routier Facile. "
         "Ouvrez le lien ci-dessous pour choisir un nouveau mot de passe :\n\n"
@@ -303,7 +336,11 @@ def _password_reset_email_bodies(reset_url: str, name: Optional[str]) -> tuple[s
         "votre mot de passe restera inchangé.\n\n"
         "— Routier Facile"
     )
-    html_body = f"""<!doctype html>
+
+
+def _reset_html_body(reset_url: str, name: Optional[str]) -> str:
+    greeting = f"Bonjour {name}," if name else "Bonjour,"
+    return f"""<!doctype html>
 <html><body style="font-family:system-ui,-apple-system,sans-serif;background:#0A0A0A;color:#fff;padding:24px;">
   <div style="max-width:520px;margin:0 auto;background:#141414;border:1px solid #27272A;border-radius:8px;padding:24px;">
     <h1 style="font-family:'Barlow Condensed',sans-serif;font-size:28px;margin:0 0 12px;color:#fff;">Routier Facile</h1>
@@ -319,40 +356,20 @@ def _password_reset_email_bodies(reset_url: str, name: Optional[str]) -> tuple[s
     <p style="color:#A1A1AA;font-size:12px;margin-top:24px;">Ce lien expire dans {PASSWORD_RESET_TTL_HOURS}h. Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail.</p>
   </div>
 </body></html>"""
-    return text_body, html_body
 
 
 async def send_password_reset_email(to_email: str, raw_token: str, name: Optional[str]) -> bool:
-    base_url = _frontend_base_url()
-    if not base_url:
-        logging.error(
-            "[brevo:reset] FRONTEND_URL/APP_BASE_URL not configured — cannot build link for %s",
-            to_email,
-        )
-        return False
-    reset_url = f"{base_url}/reset-password?token={raw_token}"
-    if not os.environ.get("BREVO_API_KEY", "").strip():
-        logging.warning(
-            "[brevo:reset] BREVO_API_KEY not configured — would send to %s | link=%s",
-            to_email, reset_url,
-        )
-        return False
-    text_body, html_body = _password_reset_email_bodies(reset_url, name)
-    try:
-        return await _send_brevo_email(
-            to_email=to_email,
-            subject="Réinitialisez votre mot de passe — Routier Facile",
-            text_body=text_body,
-            html_body=html_body,
-            recipient_name=name,
-            log_label="reset",
-        )
-    except Exception as exc:
-        logging.exception(
-            "[brevo:reset] unexpected failure sending to %s: %s",
-            to_email, exc,
-        )
-        return False
+    """Send the password-reset link. Uses the EXACT same Brevo HTTP API
+    code path as `send_verification_email` (both go through
+    `_send_transactional_email` → `_send_brevo_email`)."""
+    return await _send_transactional_email(
+        to_email=to_email, name=name, raw_token=raw_token,
+        path="/reset-password",
+        subject="Réinitialisez votre mot de passe — Routier Facile",
+        text_body_builder=_reset_text_body,
+        html_body_builder=_reset_html_body,
+        log_label="reset",
+    )
 
 
 # ============================================================
