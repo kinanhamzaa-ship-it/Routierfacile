@@ -376,7 +376,7 @@ async def send_password_reset_email(to_email: str, raw_token: str, name: Optiona
         return
  text_body = _password_reset_text_body(reset_url, name)
  html_body = _password_reset_html_body(reset_url, name)
-    await _send_brevo_email(
+ await _send_brevo_email(
         to_email=to_email,
         subject="Réinitialisez votre mot de passe — Routier Facile",
         text_body=text_body,
