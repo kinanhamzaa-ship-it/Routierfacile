@@ -9,13 +9,10 @@ import uuid
 import logging
 import bcrypt
 import jwt
-import asyncio
 import hmac
 import hashlib
 import secrets as secrets_mod
-import smtplib
-import ssl
-from email.message import EmailMessage
+import httpx
 from datetime import datetime, timezone, timedelta, date as date_cls
 from typing import List, Optional, Literal
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response
@@ -115,25 +112,70 @@ async def consume_email_verification_token(raw_token: str) -> Optional[str]:
     return doc.get("user_id")
 
 
-def _send_verification_email_sync(to_email: str, verify_url: str, name: Optional[str]) -> None:
-    """Blocking SMTP send. Runs inside asyncio.to_thread.
-    Falls back to a logged no-op when SMTP credentials are unset (dev/preview)."""
-    smtp_host = os.environ.get("SMTP_HOST", "").strip()
-    smtp_port_raw = os.environ.get("SMTP_PORT", "").strip()
-    smtp_user = os.environ.get("SMTP_USER", "").strip()
-    smtp_pass = os.environ.get("SMTP_PASS", "").strip()
-    if not smtp_host or not smtp_port_raw or not smtp_user or not smtp_pass:
+BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
+BREVO_SENDER_EMAIL = "noreply@routierfacile.com"
+BREVO_SENDER_NAME = "Routier Facile"
+
+
+async def _send_brevo_email(
+    to_email: str, subject: str, text_body: str, html_body: str, recipient_name: Optional[str] = None,
+) -> None:
+    """Send a transactional email via the Brevo HTTP API.
+    No-op (logged WARNING) when BREVO_API_KEY is unset (dev/preview).
+    Raises nothing — failures are logged so caller flow never breaks."""
+    api_key = os.environ.get("BREVO_API_KEY", "").strip()
+    if not api_key:
         logging.warning(
-            "[email] SMTP not configured — would send to %s | link=%s",
-            to_email, verify_url,
+            "[email] BREVO_API_KEY not configured — would send to %s | subject=%r",
+            to_email, subject,
         )
         return
-    smtp_port = int(smtp_port_raw)
-    mail_from = os.environ.get("MAIL_FROM", "").strip() or smtp_user
-    msg = EmailMessage()
-    msg["Subject"] = "Vérifiez votre adresse e-mail — Routier Facile"
-    msg["From"] = mail_from
-    msg["To"] = to_email
+    # Sender email/name can be overridden by env (mostly for staging tests).
+    sender_email = os.environ.get("BREVO_SENDER_EMAIL", "").strip() or BREVO_SENDER_EMAIL
+    sender_name = os.environ.get("BREVO_SENDER_NAME", "").strip() or BREVO_SENDER_NAME
+    recipient = {"email": to_email}
+    if recipient_name:
+        recipient["name"] = recipient_name
+    payload = {
+        "sender": {"email": sender_email, "name": sender_name},
+        "to": [recipient],
+        "subject": subject,
+        "textContent": text_body,
+        "htmlContent": html_body,
+    }
+    headers = {
+        "api-key": api_key,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    timeout = httpx.Timeout(15.0, connect=5.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(BREVO_API_URL, headers=headers, json=payload)
+    except httpx.RequestError as exc:
+        logging.error(
+            "[brevo] HTTP request failed for %s: %s",
+            to_email, exc, exc_info=True,
+        )
+        return
+    if response.status_code >= 400:
+        try:
+            body = response.json()
+        except ValueError:
+            body = {"raw": response.text[:500]}
+        logging.error(
+            "[brevo] send failed status=%s to=%s body=%s",
+            response.status_code, to_email, body,
+        )
+        return
+    try:
+        message_id = response.json().get("messageId")
+    except ValueError:
+        message_id = None
+    logging.info("[brevo] sent to=%s subject=%r messageId=%s", to_email, subject, message_id)
+
+
+def _verification_email_bodies(verify_url: str, name: Optional[str]) -> tuple[str, str]:
     greeting = f"Bonjour {name}," if name else "Bonjour,"
     text_body = (
         f"{greeting}\n\n"
@@ -179,10 +221,22 @@ def _send_verification_email_sync(to_email: str, verify_url: str, name: Optional
 async def send_verification_email(to_email: str, raw_token: str, name: Optional[str]) -> None:
     base_url = os.environ.get("APP_BASE_URL", "").rstrip("/")
     verify_url = f"{base_url}/verify-email?token={raw_token}"
-    try:
-        await asyncio.to_thread(_send_verification_email_sync, to_email, verify_url, name)
-    except Exception as e:
-        logging.exception("[email] failed to send verification email to %s: %s", to_email, e)
+    # Keep the dev/preview no-op behaviour so devs can still grab the link
+    # from the backend log when BREVO_API_KEY is unset.
+    if not os.environ.get("BREVO_API_KEY", "").strip():
+        logging.warning(
+            "[email] BREVO_API_KEY not configured — would send to %s | link=%s",
+            to_email, verify_url,
+        )
+        return
+    text_body, html_body = _verification_email_bodies(verify_url, name)
+    await _send_brevo_email(
+        to_email=to_email,
+        subject="Vérifiez votre adresse e-mail — Routier Facile",
+        text_body=text_body,
+        html_body=html_body,
+        recipient_name=name,
+    )
 
 
 # ============================================================
@@ -220,23 +274,7 @@ async def consume_password_reset_token(raw_token: str) -> Optional[str]:
     return doc.get("user_id")
 
 
-def _send_password_reset_email_sync(to_email: str, reset_url: str, name: Optional[str]) -> None:
-    smtp_host = os.environ.get("SMTP_HOST", "").strip()
-    smtp_port_raw = os.environ.get("SMTP_PORT", "").strip()
-    smtp_user = os.environ.get("SMTP_USER", "").strip()
-    smtp_pass = os.environ.get("SMTP_PASS", "").strip()
-    if not smtp_host or not smtp_port_raw or not smtp_user or not smtp_pass:
-        logging.warning(
-            "[email] SMTP not configured — would send password reset to %s | link=%s",
-            to_email, reset_url,
-        )
-        return
-    smtp_port = int(smtp_port_raw)
-    mail_from = os.environ.get("MAIL_FROM", "").strip() or smtp_user
-    msg = EmailMessage()
-    msg["Subject"] = "Réinitialisez votre mot de passe — Routier Facile"
-    msg["From"] = mail_from
-    msg["To"] = to_email
+def _password_reset_email_bodies(reset_url: str, name: Optional[str]) -> tuple[str, str]:
     greeting = f"Bonjour {name}," if name else "Bonjour,"
     text_body = (
         f"{greeting}\n\n"
@@ -264,29 +302,26 @@ def _send_password_reset_email_sync(to_email: str, reset_url: str, name: Optiona
     <p style="color:#A1A1AA;font-size:12px;margin-top:24px;">Ce lien expire dans {PASSWORD_RESET_TTL_HOURS}h. Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail.</p>
   </div>
 </body></html>"""
-    msg.set_content(text_body)
-    msg.add_alternative(html_body, subtype="html")
-    context = ssl.create_default_context()
-    if smtp_port == 465:
-        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=20) as server:
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
-    else:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
+    return text_body, html_body
 
 
 async def send_password_reset_email(to_email: str, raw_token: str, name: Optional[str]) -> None:
     base_url = os.environ.get("APP_BASE_URL", "").rstrip("/")
     reset_url = f"{base_url}/reset-password?token={raw_token}"
-    try:
-        await asyncio.to_thread(_send_password_reset_email_sync, to_email, reset_url, name)
-    except Exception as e:
-        logging.exception("[email] failed to send password reset to %s: %s", to_email, e)
+    if not os.environ.get("BREVO_API_KEY", "").strip():
+        logging.warning(
+            "[email] BREVO_API_KEY not configured — would send password reset to %s | link=%s",
+            to_email, reset_url,
+        )
+        return
+    text_body, html_body = _password_reset_email_bodies(reset_url, name)
+    await _send_brevo_email(
+        to_email=to_email,
+        subject="Réinitialisez votre mot de passe — Routier Facile",
+        text_body=text_body,
+        html_body=html_body,
+        recipient_name=name,
+    )
 
 
 # ============================================================
