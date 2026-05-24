@@ -133,6 +133,33 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
 - Mail transport: stdlib `smtplib` in `asyncio.to_thread`. SSL 465 / STARTTLS 587. When SMTP env vars unset → logged WARNING no-op with the URL.
 - Frontend: `/verify-pending`, `/verify-email?token=...`, resend block on `/login`. `VerifyEmail` guarded with `useRef` against StrictMode double-fire.
 
+## Update v9 (2026-02, Email transport: SMTP → Brevo HTTP API)
+- Reason: SMTP send was timing out on Render (egress restrictions on
+  outbound SMTP ports). Switched to Brevo's Transactional Email REST API,
+  which only uses HTTPS.
+- Transport: `httpx.AsyncClient` POST to `https://api.brevo.com/v3/smtp/email`
+  with `api-key` header. 15s total / 5s connect timeout.
+- Env: single new var `BREVO_API_KEY`. Sender pinned to
+  `noreply@routierfacile.com` ("Routier Facile") with optional overrides
+  via `BREVO_SENDER_EMAIL` / `BREVO_SENDER_NAME`. Legacy `SMTP_*` env vars
+  are obsolete.
+- Errors: Brevo non-2xx responses log
+  `[brevo] send failed status=<code> to=<email> body=<json>` (full Brevo
+  error body included, e.g. `{"message":"Key not found","code":"unauthorized"}`).
+  Network errors log via `[brevo] HTTP request failed` with traceback. The
+  caller flow (register / forgot-password) is NEVER blocked by transport
+  failures — emails are best-effort.
+- Dev/preview no-op preserved: when `BREVO_API_KEY` is unset the sender
+  logs a WARNING with the verification / reset URL so devs can grab the
+  token from the backend log (used by all 25 email-related tests).
+- Removed: `smtplib`, `ssl`, `EmailMessage`, `asyncio.to_thread` imports.
+  HTML / text bodies extracted into pure helper functions
+  (`_verification_email_bodies`, `_password_reset_email_bodies`) so the
+  transport swap was a true 1:1 replacement.
+- Regression: 25/25 email-flow tests + 70 prior business-logic tests still
+  PASS. Verified live against Brevo with a deliberate invalid key — the
+  401 response was captured and logged with the structured error body.
+
 ## Update v8 (2026-02, Forgot password + Delete account + No Emergent branding)
 - **Forgot password**: `POST /auth/forgot-password {email}` (generic 200,
   no enumeration, 60s cooldown) and `POST /auth/reset-password {token,
