@@ -118,8 +118,13 @@ BREVO_SENDER_NAME = "Routier Facile"
 
 
 async def _send_brevo_email(
-    to_email: str, subject: str, text_body: str, html_body: str, recipient_name: Optional[str] = None,
-) -> None:
+    to_email: str,
+    subject: str,
+    text_body: str,
+    html_body: str,
+    recipient_name: Optional[str] = None,
+    log_label: str = "email",
+) -> bool:
     """Send a transactional email via the Brevo HTTP API.
     No-op (logged WARNING) when BREVO_API_KEY is unset (dev/preview).
     Raises nothing — failures are logged so caller flow never breaks."""
