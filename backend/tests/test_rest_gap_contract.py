@@ -34,13 +34,9 @@ WEEKLY_REST_MIN = 1440
 
 # ---------- helpers ----------
 def _register():
-    email = f"TEST_restgap_{uuid.uuid4().hex[:8]}@example.com"
-    r = requests.post(
-        f"{API}/auth/register",
-        json={"email": email, "password": "Passw0rd!", "name": "RestGap"},
-    )
-    assert r.status_code == 200, r.text
-    return r.json()["token"]
+    from conftest import register_verified_user
+    token, _, _ = register_verified_user(name="RestGap")
+    return token
 
 
 def _h(token):

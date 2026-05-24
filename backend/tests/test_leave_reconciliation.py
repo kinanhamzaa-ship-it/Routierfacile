@@ -36,12 +36,9 @@ API = f"{BASE_URL}/api"
 
 
 def _register():
-    email = f"TEST_rec_{uuid.uuid4().hex[:8]}@example.com"
-    r = requests.post(f"{API}/auth/register",
-                      json={"email": email, "password": "Passw0rd!", "name": "Rec Test"})
-    assert r.status_code == 200, r.text
-    j = r.json()
-    return j["token"], j["user"]["id"]
+    from conftest import register_verified_user
+    token, user_id, _ = register_verified_user(name="Rec Test")
+    return token, user_id
 
 
 def _h(token):

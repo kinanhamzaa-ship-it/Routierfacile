@@ -9,6 +9,13 @@ import uuid
 import logging
 import bcrypt
 import jwt
+import asyncio
+import hmac
+import hashlib
+import secrets as secrets_mod
+import smtplib
+import ssl
+from email.message import EmailMessage
 from datetime import datetime, timezone, timedelta, date as date_cls
 from typing import List, Optional, Literal
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response
@@ -37,6 +44,8 @@ MIN_QUALIFYING_BREAK = 45  # minutes total to reset driving counter
 MIN_SECOND_SPLIT_BREAK = 30  # at least one break of 30+ min within split
 LEAVE_THRESHOLD_DAYS = 6  # >=6 consecutive inactive days create a leave-period cycle
 MAX_DAYS_PER_CYCLE = 6  # hard cap on working-day entries per (non-leave) cycle
+EMAIL_VERIFICATION_TTL_HOURS = 24
+EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
 
 
 def get_jwt_secret() -> str:
@@ -59,6 +68,122 @@ def create_access_token(user_id: str, email: str) -> str:
 
 
 # ============================================================
+# Email verification helpers
+def _hash_verification_token(raw_token: str) -> str:
+    """HMAC-SHA256 the raw token with JWT_SECRET so DB never stores the
+    raw value. Verifying a presented token re-hashes and compares."""
+    secret = get_jwt_secret().encode("utf-8")
+    return hmac.new(secret, raw_token.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+async def create_email_verification_token(user_id: str, email: str) -> str:
+    """Create + persist a single-use verification token. Any prior unused
+    tokens for the same user are invalidated."""
+    raw_token = secrets_mod.token_urlsafe(32)
+    token_hash = _hash_verification_token(raw_token)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=EMAIL_VERIFICATION_TTL_HOURS)
+    # Invalidate any older tokens for this user — only the latest may be used.
+    await db.email_verification_tokens.delete_many({"user_id": user_id})
+    await db.email_verification_tokens.insert_one({
+        "user_id": user_id,
+        "email": email,
+        "token_hash": token_hash,
+        "created_at": now.isoformat(),
+        "expires_at": expires_at,
+    })
+    return raw_token
+
+
+async def consume_email_verification_token(raw_token: str) -> Optional[str]:
+    """Validate + delete a token. Returns user_id on success, else None."""
+    token_hash = _hash_verification_token(raw_token)
+    doc = await db.email_verification_tokens.find_one({"token_hash": token_hash})
+    if not doc:
+        return None
+    expires_at = doc.get("expires_at")
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at and expires_at < datetime.now(timezone.utc):
+        await db.email_verification_tokens.delete_one({"_id": doc["_id"]})
+        return None
+    await db.email_verification_tokens.delete_one({"_id": doc["_id"]})
+    return doc.get("user_id")
+
+
+def _send_verification_email_sync(to_email: str, verify_url: str, name: Optional[str]) -> None:
+    """Blocking SMTP send. Runs inside asyncio.to_thread.
+    Falls back to a logged no-op when SMTP credentials are unset (dev/preview)."""
+    smtp_host = os.environ.get("SMTP_HOST", "").strip()
+    smtp_port_raw = os.environ.get("SMTP_PORT", "").strip()
+    smtp_user = os.environ.get("SMTP_USER", "").strip()
+    smtp_pass = os.environ.get("SMTP_PASS", "").strip()
+    if not smtp_host or not smtp_port_raw or not smtp_user or not smtp_pass:
+        logging.warning(
+            "[email] SMTP not configured — would send to %s | link=%s",
+            to_email, verify_url,
+        )
+        return
+    smtp_port = int(smtp_port_raw)
+    mail_from = os.environ.get("MAIL_FROM", "").strip() or smtp_user
+    msg = EmailMessage()
+    msg["Subject"] = "Vérifiez votre adresse e-mail — Routier Facile"
+    msg["From"] = mail_from
+    msg["To"] = to_email
+    greeting = f"Bonjour {name}," if name else "Bonjour,"
+    text_body = (
+        f"{greeting}\n\n"
+        "Bienvenue sur Routier Facile. Pour activer votre compte, "
+        "veuillez vérifier votre adresse e-mail en ouvrant le lien ci-dessous :\n\n"
+        f"{verify_url}\n\n"
+        f"Ce lien expire dans {EMAIL_VERIFICATION_TTL_HOURS}h.\n\n"
+        "Si vous n'êtes pas à l'origine de cette inscription, ignorez cet e-mail.\n\n"
+        "— Routier Facile"
+    )
+    html_body = f"""<!doctype html>
+<html><body style="font-family:system-ui,-apple-system,sans-serif;background:#0A0A0A;color:#fff;padding:24px;">
+  <div style="max-width:520px;margin:0 auto;background:#141414;border:1px solid #27272A;border-radius:8px;padding:24px;">
+    <h1 style="font-family:'Barlow Condensed',sans-serif;font-size:28px;margin:0 0 12px;color:#fff;">Routier Facile</h1>
+    <p style="margin:0 0 16px;color:#A1A1AA;">{greeting}</p>
+    <p style="margin:0 0 16px;">Bienvenue ! Pour activer votre compte, vérifiez votre adresse e-mail :</p>
+    <p style="text-align:center;margin:24px 0;">
+      <a href="{verify_url}" style="display:inline-block;padding:12px 24px;background:#007AFF;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">
+        Vérifier mon e-mail
+      </a>
+    </p>
+    <p style="color:#A1A1AA;font-size:13px;">Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :</p>
+    <p style="word-break:break-all;font-size:12px;color:#A1A1AA;"><a href="{verify_url}" style="color:#007AFF;">{verify_url}</a></p>
+    <p style="color:#A1A1AA;font-size:12px;margin-top:24px;">Ce lien expire dans {EMAIL_VERIFICATION_TTL_HOURS}h. Si vous n'êtes pas à l'origine de cette inscription, ignorez cet e-mail.</p>
+  </div>
+</body></html>"""
+    msg.set_content(text_body)
+    msg.add_alternative(html_body, subtype="html")
+    context = ssl.create_default_context()
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=20) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+
+
+async def send_verification_email(to_email: str, raw_token: str, name: Optional[str]) -> None:
+    base_url = os.environ.get("APP_BASE_URL", "").rstrip("/")
+    verify_url = f"{base_url}/verify-email?token={raw_token}"
+    try:
+        await asyncio.to_thread(_send_verification_email_sync, to_email, verify_url, name)
+    except Exception as e:
+        logging.exception("[email] failed to send verification email to %s: %s", to_email, e)
+
+
+# ============================================================
 # Models
 class UserOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -66,6 +191,7 @@ class UserOut(BaseModel):
     email: str
     name: Optional[str] = None
     role: str = "driver"
+    email_verified: bool = False
 
 
 class RegisterIn(BaseModel):
@@ -82,6 +208,25 @@ class LoginIn(BaseModel):
 class AuthResponse(BaseModel):
     user: UserOut
     token: str
+
+
+class RegisterResponse(BaseModel):
+    email: str
+    email_verified: bool = False
+    message: str
+
+
+class ResendVerificationIn(BaseModel):
+    email: EmailStr
+
+
+class VerifyEmailIn(BaseModel):
+    token: str
+
+
+class VerifyEmailResponse(BaseModel):
+    ok: bool
+    email: Optional[str] = None
 
 
 MealStatus = Literal["yes", "no", "unsure"]
@@ -416,20 +561,26 @@ async def recompute_cycle_counters(cycle_id: str):
 
 # ============================================================
 # Auth endpoints
-@api_router.post("/auth/register", response_model=AuthResponse)
-async def register(payload: RegisterIn, response: Response):
+@api_router.post("/auth/register", response_model=RegisterResponse)
+async def register(payload: RegisterIn):
     email = payload.email.lower().strip()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Cet email est déjà utilisé")
     uid = str(uuid.uuid4())
+    display_name = payload.name or email.split("@")[0]
     await db.users.insert_one({
         "id": uid, "email": email, "password_hash": hash_password(payload.password),
-        "name": payload.name or email.split("@")[0], "role": "driver",
+        "name": display_name, "role": "driver",
+        "email_verified": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
-    token = create_access_token(uid, email)
-    response.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=7*24*3600, path="/")
-    return {"user": {"id": uid, "email": email, "name": payload.name or email.split("@")[0], "role": "driver"}, "token": token}
+    raw_token = await create_email_verification_token(uid, email)
+    await send_verification_email(email, raw_token, display_name)
+    return {
+        "email": email,
+        "email_verified": False,
+        "message": "Compte créé. Un e-mail de vérification vous a été envoyé.",
+    }
 
 
 @api_router.post("/auth/login", response_model=AuthResponse)
@@ -438,9 +589,74 @@ async def login(payload: LoginIn, response: Response):
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
+    if not user.get("email_verified", False):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "email_not_verified",
+                "message": "Veuillez vérifier votre adresse e-mail avant de vous connecter.",
+                "email": email,
+            },
+        )
     token = create_access_token(user["id"], email)
     response.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=7*24*3600, path="/")
-    return {"user": {"id": user["id"], "email": email, "name": user.get("name"), "role": user.get("role", "driver")}, "token": token}
+    return {
+        "user": {
+            "id": user["id"], "email": email, "name": user.get("name"),
+            "role": user.get("role", "driver"),
+            "email_verified": True,
+        },
+        "token": token,
+    }
+
+
+@api_router.post("/auth/verify-email", response_model=VerifyEmailResponse)
+async def verify_email(payload: VerifyEmailIn):
+    user_id = await consume_email_verification_token(payload.token)
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_or_expired_token",
+                    "message": "Lien de vérification invalide ou expiré. Demandez un nouveau lien."},
+        )
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=400, detail={"code": "user_not_found", "message": "Utilisateur introuvable."})
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"email_verified": True, "verified_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"ok": True, "email": user.get("email")}
+
+
+@api_router.post("/auth/resend-verification")
+async def resend_verification(payload: ResendVerificationIn):
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    # Always respond 200 with the same generic body so attackers cannot enumerate emails.
+    generic = {"ok": True, "message": "Si un compte existe pour cette adresse, un e-mail de vérification a été envoyé."}
+    if not user:
+        return generic
+    if user.get("email_verified"):
+        return generic
+    # Cooldown: refuse if a token was created within the last N seconds.
+    existing = await db.email_verification_tokens.find_one({"user_id": user["id"]})
+    if existing:
+        created_at = existing.get("created_at")
+        if isinstance(created_at, str):
+            try:
+                created_at_dt = datetime.fromisoformat(created_at)
+            except ValueError:
+                created_at_dt = None
+        else:
+            created_at_dt = created_at
+        if created_at_dt and created_at_dt.tzinfo is None:
+            created_at_dt = created_at_dt.replace(tzinfo=timezone.utc)
+        if created_at_dt and (datetime.now(timezone.utc) - created_at_dt).total_seconds() < EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS:
+            return generic
+    raw_token = await create_email_verification_token(user["id"], email)
+    await send_verification_email(email, raw_token, user.get("name"))
+    return generic
 
 
 @api_router.post("/auth/logout")
@@ -451,7 +667,11 @@ async def logout(response: Response):
 
 @api_router.get("/auth/me", response_model=UserOut)
 async def me(user: dict = Depends(get_current_user)):
-    return {"id": user["id"], "email": user["email"], "name": user.get("name"), "role": user.get("role", "driver")}
+    return {
+        "id": user["id"], "email": user["email"], "name": user.get("name"),
+        "role": user.get("role", "driver"),
+        "email_verified": user.get("email_verified", False),
+    }
 
 
 # ============================================================
@@ -865,6 +1085,17 @@ async def startup():
     await db.users.create_index("email", unique=True)
     await db.entries.create_index([("user_id", 1), ("date", -1)])
     await db.cycles.create_index([("user_id", 1), ("ended_at", 1)])
+    # Email verification token store: index on token_hash for fast lookup,
+    # TTL index on expires_at so expired tokens are auto-purged by MongoDB.
+    await db.email_verification_tokens.create_index("token_hash", unique=True)
+    await db.email_verification_tokens.create_index("user_id")
+    await db.email_verification_tokens.create_index("expires_at", expireAfterSeconds=0)
+    # Backfill: any existing user without the email_verified field gets False.
+    # Existing accounts must verify before logging in again.
+    await db.users.update_many(
+        {"email_verified": {"$exists": False}},
+        {"$set": {"email_verified": False}},
+    )
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@routier-facile.fr")
     admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")
     existing = await db.users.find_one({"email": admin_email})
@@ -873,10 +1104,19 @@ async def startup():
             "id": str(uuid.uuid4()), "email": admin_email,
             "password_hash": hash_password(admin_password),
             "name": "Admin", "role": "admin",
+            "email_verified": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
-    elif not verify_password(admin_password, existing["password_hash"]):
-        await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
+    else:
+        updates = {}
+        if not verify_password(admin_password, existing["password_hash"]):
+            updates["password_hash"] = hash_password(admin_password)
+        # Admin is a system-managed account; it bypasses email verification so
+        # we don't lock ourselves out when the seed mailbox isn't real.
+        if not existing.get("email_verified"):
+            updates["email_verified"] = True
+        if updates:
+            await db.users.update_one({"email": admin_email}, {"$set": updates})
 
 
 @app.on_event("shutdown")

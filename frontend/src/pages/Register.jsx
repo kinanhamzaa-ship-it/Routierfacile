@@ -14,9 +14,11 @@ export default function Register() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    const ok = await register(email, password, name);
+    const res = await register(email, password, name);
     setLoading(false);
-    if (ok) nav("/", { replace: true });
+    if (res.ok) {
+      nav("/verify-pending", { state: { email: res.email }, replace: true });
+    }
   };
 
   return (
