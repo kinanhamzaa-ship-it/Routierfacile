@@ -164,11 +164,11 @@ def _send_verification_email_sync(to_email: str, verify_url: str, name: Optional
     msg.add_alternative(html_body, subtype="html")
     context = ssl.create_default_context()
     if smtp_port == 465:
-        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=20) as server:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=60) as server:
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
     else:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=60) as server:
             server.ehlo()
             server.starttls(context=context)
             server.ehlo()
