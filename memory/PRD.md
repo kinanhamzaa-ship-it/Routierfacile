@@ -143,6 +143,41 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
   `noreply@routierfacile.com` ("Routier Facile") with optional overrides
   via `BREVO_SENDER_EMAIL` / `BREVO_SENDER_NAME`. Legacy `SMTP_*` env vars
   are obsolete.
+- Removed: `smtplib`, `ssl`, `EmailMessage`, `asyncio.to_thread` imports.
+- Regression: 25/25 email-flow tests + 70 prior tests still PASS.
+
+## Update v10 (2026-02, Verification email + reset-link URL hardening)
+- **Root cause of "reset link 404"**: link generation was using
+  `APP_BASE_URL` which on Render pointed at the backend (or was empty),
+  yielding `<backend>/reset-password?...` which has no such route.
+  Switched to `FRONTEND_URL` (preferred) with `APP_BASE_URL` kept as a
+  fallback for back-compat. Helper: `_frontend_base_url()`. Production
+  value: `FRONTEND_URL=https://www.routierfacile.com`.
+- **Verification + reset are now 100% symmetric**: both call
+  `_send_brevo_email(..., log_label="verification" | "reset")` through the
+  same async httpx path. Per-flow `try/except` wraps so an unexpected
+  exception cannot silently break the caller.
+- **Stronger logging**: every send now emits ONE of three labelled lines —
+  `[brevo:<label>] sent OK to=… messageId=…` on success,
+  `[brevo:<label>] send failed status=… body=…` on Brevo non-2xx (full
+  Brevo error body included),
+  `[brevo:<label>] HTTP request failed` on network errors.
+- **`register` returns `email_sent: bool`** so the client knows whether the
+  email actually left the server. The user message stays the same.
+- **Error guard for missing FRONTEND_URL**: if neither `FRONTEND_URL` nor
+  `APP_BASE_URL` is set, the sender logs an `ERROR` and aborts — no broken
+  link is ever sent to a user.
+- Regression: 25/25 email-flow tests still PASS. No backend / cycle /
+  dashboard / PDF logic changed.
+- Reason: SMTP send was timing out on Render (egress restrictions on
+  outbound SMTP ports). Switched to Brevo's Transactional Email REST API,
+  which only uses HTTPS.
+- Transport: `httpx.AsyncClient` POST to `https://api.brevo.com/v3/smtp/email`
+  with `api-key` header. 15s total / 5s connect timeout.
+- Env: single new var `BREVO_API_KEY`. Sender pinned to
+  `noreply@routierfacile.com` ("Routier Facile") with optional overrides
+  via `BREVO_SENDER_EMAIL` / `BREVO_SENDER_NAME`. Legacy `SMTP_*` env vars
+  are obsolete.
 - Errors: Brevo non-2xx responses log
   `[brevo] send failed status=<code> to=<email> body=<json>` (full Brevo
   error body included, e.g. `{"message":"Key not found","code":"unauthorized"}`).
