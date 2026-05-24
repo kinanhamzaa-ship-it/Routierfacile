@@ -126,39 +126,34 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
   `min-h-[56px]` on bottom nav tabs, responsive padding on Login/Register.
 
 ## Update v7 (2026-02, Email verification via Brevo SMTP)
-- `/auth/register` no longer auto-logs in: returns
-  `{email, email_verified:false, message}`. A verification email is sent
-  containing a 24h-TTL single-use token.
-- Tokens are stored as **HMAC-SHA256 hash** of the raw value, keyed with
-  `JWT_SECRET`. The raw value is never in MongoDB. MongoDB TTL index on
-  `expires_at` auto-purges expired tokens.
-- `/auth/login` returns **403** when the user is not verified:
-  `{code:"email_not_verified", message:"Veuillez vérifier votre adresse e-mail avant de vous connecter.", email}`.
-- New endpoints:
-  - `POST /auth/verify-email {token}` → consumes the token, flips
-    `email_verified=true`. Single-use; second call returns 400.
-  - `POST /auth/resend-verification {email}` → always returns the same
-    generic 200 to prevent email enumeration. 60s cooldown per user.
-- **Startup backfill**: any existing user without the `email_verified`
-  field is set to `false`. Existing accounts MUST verify on next login.
-- The seeded admin (`admin@routier-facile.fr`) is the only system-managed
-  account and is auto-verified at startup (its mailbox doesn't accept mail).
-- Mail transport: stdlib `smtplib` run inside `asyncio.to_thread`. SSL on
-  port 465, STARTTLS on 587. When SMTP env vars are unset (preview/CI), the
-  sender is a logged WARNING no-op (verification URL written to the backend
-  log so devs can copy it). Production sets `SMTP_HOST/PORT/USER/PASS` and
-  `MAIL_FROM` in Render env.
-- Frontend: new pages `/verify-pending` (post-register "check your email"
-  with resend) and `/verify-email?token=...` (validates, shows success or
-  error with retry link). Login page shows the French message + a resend
-  block when login is blocked by `email_not_verified`. `VerifyEmail` uses a
-  `useRef` guard so React.StrictMode's double-mount doesn't double-consume
-  the single-use token.
-- Tests: 13 in `test_email_verification.py` + 5 in
-  `test_email_verification_extra.py` (SMTP no-op log, admin auto-verified,
-  TTL index present, manually expired token, post-cooldown rotation) = 18
-  new PASS. Regression: 52/52 prior tests still PASS via the new shared
-  `conftest.py::register_verified_user` helper.
+- `/auth/register` no longer auto-logs in: returns `{email, email_verified:false, message}`. Verification email sent (24h-TTL single-use token, HMAC-SHA256 at rest, TTL index on `expires_at`).
+- `/auth/login` returns 403 `{code:"email_not_verified", message, email}` until verified.
+- New endpoints: `POST /auth/verify-email`, `POST /auth/resend-verification` (generic 200, 60s cooldown, no enumeration).
+- Backfill: existing users without `email_verified` field get `false` on startup. Admin is the only system-managed exception (auto-verified).
+- Mail transport: stdlib `smtplib` in `asyncio.to_thread`. SSL 465 / STARTTLS 587. When SMTP env vars unset → logged WARNING no-op with the URL.
+- Frontend: `/verify-pending`, `/verify-email?token=...`, resend block on `/login`. `VerifyEmail` guarded with `useRef` against StrictMode double-fire.
+
+## Update v8 (2026-02, Forgot password + Delete account + No Emergent branding)
+- **Forgot password**: `POST /auth/forgot-password {email}` (generic 200,
+  no enumeration, 60s cooldown) and `POST /auth/reset-password {token,
+  new_password}`. Tokens HMAC-SHA256-hashed at rest, **1h TTL** via Mongo
+  `expireAfterSeconds=0`, single-use. New frontend pages `/forgot-password`
+  and `/reset-password`; "Mot de passe oublié ?" link on `/login`.
+- **Delete account**: `DELETE /auth/me {password}` requires the current
+  password for confirmation. Returns 403 `{code:"invalid_password"}` on
+  mismatch, 200 with `{deleted_entries, deleted_cycles}` on success. Purges
+  the user doc + entries + cycles + email_verification_tokens +
+  password_reset_tokens, and clears the auth cookie. New `/account` page
+  with a "Zone dangereuse" delete confirmation modal; reachable from the
+  Dashboard via a `UserGear` icon.
+- **Emergent branding removed**: dropped the inline `#emergent-badge`
+  anchor and the `emergent-main.js` CDN script from `index.html`. Defensive
+  CSS hides any future re-injection (`#emergent-badge, a[href*="emergent.sh"]
+  { display: none !important }`). Verified 0 occurrences on /login,
+  /dashboard, /account, /verify-email, /forgot-password.
+- Tests: `/app/backend/tests/test_forgot_password_and_delete.py` (12 PASS,
+  including HMAC hash check, cooldown, single-use, full account purge with
+  Mongo inspection). **Regression: 70/70 prior tests still PASS.**
 - Installable PWA: `manifest.json` (standalone display, portrait, dark theme,
   `start_url=/`), `service-worker.js` (network-first for HTML, cache-first
   for static; **never caches `/api/`**), registered after page load so it
