@@ -273,24 +273,17 @@ def _verification_html_body(verify_url: str, name: Optional[str]) -> str:
             server.send_message(msg)
 
 
-async def send_verification_email(to_email: str, raw_token: str, name: Optional[str]) -> None:
-    base_url = os.environ.get("APP_BASE_URL", "").rstrip("/")
-    verify_url = f"{base_url}/verify-email?token={raw_token}"
-    # Keep the dev/preview no-op behaviour so devs can still grab the link
-    # from the backend log when BREVO_API_KEY is unset.
-    if not os.environ.get("BREVO_API_KEY", "").strip():
-        logging.warning(
-            "[email] BREVO_API_KEY not configured — would send to %s | link=%s",
-            to_email, verify_url,
-        )
-        return
-    text_body, html_body = _verification_email_bodies(verify_url, name)
-    await _send_brevo_email(
+async def send_verification_email(to_email: str, raw_token: str, name: Optional[str]) -> bool:
+    """Send the email-verification link using the unified Brevo flow."""
+    return await _send_transactional_email(
         to_email=to_email,
+        name=name,
+        raw_token=raw_token,
+        path="/verify-email",
         subject="Vérifiez votre adresse e-mail — Routier Facile",
-        text_body=text_body,
-        html_body=html_body,
-        recipient_name=name,
+        text_body_builder=_verification_text_body,
+        html_body_builder=_verification_html_body,
+        log_label="verification",
     )
 
 
