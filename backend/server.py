@@ -366,17 +366,20 @@ def _reset_html_body(reset_url: str, name: Optional[str]) -> str:
 
 
 async def send_password_reset_email(to_email: str, raw_token: str, name: Optional[str]) -> None:
-    base_url = os.environ.get("APP_BASE_URL", "").rstrip("/")
+    base_url = os.environ.get("APP_BASE_URL", "").strip("/")
     reset_url = f"{base_url}/reset-password?token={raw_token}"
+
     if not os.environ.get("BREVO_API_KEY", "").strip():
         logging.warning(
             "[email] BREVO_API_KEY not configured — would send password reset to %s | link=%s",
             to_email, reset_url,
         )
         return
- text_body = _password_reset_text_body(reset_url, name)
- html_body = _password_reset_html_body(reset_url, name)
- await _send_brevo_email(
+
+    text_body = _password_reset_text_body(reset_url, name)
+    html_body = _password_reset_html_body(reset_url, name)
+
+    await _send_brevo_email(
         to_email=to_email,
         subject="Réinitialisez votre mot de passe — Routier Facile",
         text_body=text_body,
