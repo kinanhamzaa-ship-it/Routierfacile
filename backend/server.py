@@ -202,7 +202,20 @@ def _verification_email_bodies(verify_url: str, name: Optional[str]) -> tuple[st
     <p style="color:#A1A1AA;font-size:12px;margin-top:24px;">Ce lien expire dans {EMAIL_VERIFICATION_TTL_HOURS}h. Si vous n'êtes pas à l'origine de cette inscription, ignorez cet e-mail.</p>
   </div>
 </body></html>"""
-    return text_body, html_body
+    msg.set_content(text_body)
+    msg.add_alternative(html_body, subtype="html")
+    context = ssl.create_default_context()
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=60) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=60) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
 
 
 async def send_verification_email(to_email: str, raw_token: str, name: Optional[str]) -> None:
