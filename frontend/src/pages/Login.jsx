@@ -110,6 +110,15 @@ export default function Login() {
         >
           {loading ? "Connexion…" : "Se connecter"}
         </button>
+        <div className="text-center">
+          <Link
+            to="/forgot-password"
+            data-testid="link-forgot-password"
+            className="text-rf-muted text-sm hover:text-rf-blue"
+          >
+            Mot de passe oublié ?
+          </Link>
+        </div>
         <p className="text-center text-rf-muted text-sm">
           Pas encore de compte ?{" "}
           <Link to="/register" data-testid="link-register" className="text-rf-blue">

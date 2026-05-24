@@ -62,6 +62,35 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const forgotPassword = useCallback(async (email) => {
+    try {
+      const { data } = await api.post("/auth/forgot-password", { email });
+      return { ok: true, message: data?.message };
+    } catch (e) {
+      return { ok: false, message: formatApiError(e.response?.data?.detail) || e.message };
+    }
+  }, []);
+
+  const resetPassword = useCallback(async (token, newPassword) => {
+    try {
+      await api.post("/auth/reset-password", { token, new_password: newPassword });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: formatApiError(e.response?.data?.detail) || e.message };
+    }
+  }, []);
+
+  const deleteAccount = useCallback(async (password) => {
+    try {
+      await api.delete("/auth/me", { data: { password } });
+      localStorage.removeItem("rf_token");
+      setUser(false);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: formatApiError(e.response?.data?.detail) || e.message };
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api.post("/auth/logout");
@@ -73,8 +102,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, login, register, logout, resendVerification, error, setError }),
-    [user, login, register, logout, resendVerification, error]
+    () => ({ user, login, register, logout, resendVerification, forgotPassword, resetPassword, deleteAccount, error, setError }),
+    [user, login, register, logout, resendVerification, forgotPassword, resetPassword, deleteAccount, error]
   );
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;

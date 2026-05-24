@@ -46,6 +46,8 @@ LEAVE_THRESHOLD_DAYS = 6  # >=6 consecutive inactive days create a leave-period 
 MAX_DAYS_PER_CYCLE = 6  # hard cap on working-day entries per (non-leave) cycle
 EMAIL_VERIFICATION_TTL_HOURS = 24
 EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
+PASSWORD_RESET_TTL_HOURS = 1
+PASSWORD_RESET_RESEND_COOLDOWN_SECONDS = 60
 
 
 def get_jwt_secret() -> str:
@@ -184,6 +186,110 @@ async def send_verification_email(to_email: str, raw_token: str, name: Optional[
 
 
 # ============================================================
+# Password reset helpers (same hashed-token pattern as email verification)
+async def create_password_reset_token(user_id: str, email: str) -> str:
+    raw_token = secrets_mod.token_urlsafe(32)
+    token_hash = _hash_verification_token(raw_token)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=PASSWORD_RESET_TTL_HOURS)
+    await db.password_reset_tokens.delete_many({"user_id": user_id})
+    await db.password_reset_tokens.insert_one({
+        "user_id": user_id,
+        "email": email,
+        "token_hash": token_hash,
+        "created_at": now.isoformat(),
+        "expires_at": expires_at,
+    })
+    return raw_token
+
+
+async def consume_password_reset_token(raw_token: str) -> Optional[str]:
+    token_hash = _hash_verification_token(raw_token)
+    doc = await db.password_reset_tokens.find_one({"token_hash": token_hash})
+    if not doc:
+        return None
+    expires_at = doc.get("expires_at")
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at and expires_at < datetime.now(timezone.utc):
+        await db.password_reset_tokens.delete_one({"_id": doc["_id"]})
+        return None
+    await db.password_reset_tokens.delete_one({"_id": doc["_id"]})
+    return doc.get("user_id")
+
+
+def _send_password_reset_email_sync(to_email: str, reset_url: str, name: Optional[str]) -> None:
+    smtp_host = os.environ.get("SMTP_HOST", "").strip()
+    smtp_port_raw = os.environ.get("SMTP_PORT", "").strip()
+    smtp_user = os.environ.get("SMTP_USER", "").strip()
+    smtp_pass = os.environ.get("SMTP_PASS", "").strip()
+    if not smtp_host or not smtp_port_raw or not smtp_user or not smtp_pass:
+        logging.warning(
+            "[email] SMTP not configured — would send password reset to %s | link=%s",
+            to_email, reset_url,
+        )
+        return
+    smtp_port = int(smtp_port_raw)
+    mail_from = os.environ.get("MAIL_FROM", "").strip() or smtp_user
+    msg = EmailMessage()
+    msg["Subject"] = "Réinitialisez votre mot de passe — Routier Facile"
+    msg["From"] = mail_from
+    msg["To"] = to_email
+    greeting = f"Bonjour {name}," if name else "Bonjour,"
+    text_body = (
+        f"{greeting}\n\n"
+        "Vous avez demandé à réinitialiser votre mot de passe sur Routier Facile. "
+        "Ouvrez le lien ci-dessous pour choisir un nouveau mot de passe :\n\n"
+        f"{reset_url}\n\n"
+        f"Ce lien expire dans {PASSWORD_RESET_TTL_HOURS}h.\n\n"
+        "Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail — "
+        "votre mot de passe restera inchangé.\n\n"
+        "— Routier Facile"
+    )
+    html_body = f"""<!doctype html>
+<html><body style="font-family:system-ui,-apple-system,sans-serif;background:#0A0A0A;color:#fff;padding:24px;">
+  <div style="max-width:520px;margin:0 auto;background:#141414;border:1px solid #27272A;border-radius:8px;padding:24px;">
+    <h1 style="font-family:'Barlow Condensed',sans-serif;font-size:28px;margin:0 0 12px;color:#fff;">Routier Facile</h1>
+    <p style="margin:0 0 16px;color:#A1A1AA;">{greeting}</p>
+    <p style="margin:0 0 16px;">Vous avez demandé à réinitialiser votre mot de passe. Cliquez sur le bouton ci-dessous :</p>
+    <p style="text-align:center;margin:24px 0;">
+      <a href="{reset_url}" style="display:inline-block;padding:12px 24px;background:#007AFF;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">
+        Choisir un nouveau mot de passe
+      </a>
+    </p>
+    <p style="color:#A1A1AA;font-size:13px;">Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :</p>
+    <p style="word-break:break-all;font-size:12px;color:#A1A1AA;"><a href="{reset_url}" style="color:#007AFF;">{reset_url}</a></p>
+    <p style="color:#A1A1AA;font-size:12px;margin-top:24px;">Ce lien expire dans {PASSWORD_RESET_TTL_HOURS}h. Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail.</p>
+  </div>
+</body></html>"""
+    msg.set_content(text_body)
+    msg.add_alternative(html_body, subtype="html")
+    context = ssl.create_default_context()
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=20) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+
+
+async def send_password_reset_email(to_email: str, raw_token: str, name: Optional[str]) -> None:
+    base_url = os.environ.get("APP_BASE_URL", "").rstrip("/")
+    reset_url = f"{base_url}/reset-password?token={raw_token}"
+    try:
+        await asyncio.to_thread(_send_password_reset_email_sync, to_email, reset_url, name)
+    except Exception as e:
+        logging.exception("[email] failed to send password reset to %s: %s", to_email, e)
+
+
+# ============================================================
 # Models
 class UserOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -227,6 +333,19 @@ class VerifyEmailIn(BaseModel):
 class VerifyEmailResponse(BaseModel):
     ok: bool
     email: Optional[str] = None
+
+
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordIn(BaseModel):
+    token: str
+    new_password: str = Field(min_length=6, max_length=128)
+
+
+class DeleteAccountIn(BaseModel):
+    password: str
 
 
 MealStatus = Literal["yes", "no", "unsure"]
@@ -657,6 +776,84 @@ async def resend_verification(payload: ResendVerificationIn):
     raw_token = await create_email_verification_token(user["id"], email)
     await send_verification_email(email, raw_token, user.get("name"))
     return generic
+
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(payload: ForgotPasswordIn):
+    """Send a password-reset link. Always returns the same generic body to
+    avoid email enumeration."""
+    email = payload.email.lower().strip()
+    generic = {"ok": True, "message": "Si un compte existe pour cette adresse, un lien de réinitialisation a été envoyé."}
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        return generic
+    # 60s cooldown on consecutive requests
+    existing = await db.password_reset_tokens.find_one({"user_id": user["id"]})
+    if existing:
+        created_at = existing.get("created_at")
+        if isinstance(created_at, str):
+            try:
+                created_at_dt = datetime.fromisoformat(created_at)
+            except ValueError:
+                created_at_dt = None
+        else:
+            created_at_dt = created_at
+        if created_at_dt and created_at_dt.tzinfo is None:
+            created_at_dt = created_at_dt.replace(tzinfo=timezone.utc)
+        if created_at_dt and (datetime.now(timezone.utc) - created_at_dt).total_seconds() < PASSWORD_RESET_RESEND_COOLDOWN_SECONDS:
+            return generic
+    raw_token = await create_password_reset_token(user["id"], email)
+    await send_password_reset_email(email, raw_token, user.get("name"))
+    return generic
+
+
+@api_router.post("/auth/reset-password")
+async def reset_password(payload: ResetPasswordIn, response: Response):
+    user_id = await consume_password_reset_token(payload.token)
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_or_expired_token",
+                    "message": "Lien de réinitialisation invalide ou expiré. Demandez un nouveau lien."},
+        )
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=400, detail={"code": "user_not_found", "message": "Utilisateur introuvable."})
+    new_hash = hash_password(payload.new_password)
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"password_hash": new_hash, "password_changed_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    # Invalidate any cookie sessions immediately.
+    response.delete_cookie("access_token", path="/")
+    return {"ok": True, "email": user.get("email")}
+
+
+@api_router.delete("/auth/me")
+async def delete_account(payload: DeleteAccountIn, response: Response, user: dict = Depends(get_current_user)):
+    """Permanently delete the authenticated user's account and all related
+    personal data (entries, cycles, verification tokens, reset tokens).
+    Requires the current password as a confirmation."""
+    # get_current_user strips password_hash; re-fetch to verify the password.
+    full_user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    if not full_user or not verify_password(payload.password, full_user["password_hash"]):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "invalid_password",
+                    "message": "Mot de passe incorrect."},
+        )
+    uid = user["id"]
+    deleted_entries = (await db.entries.delete_many({"user_id": uid})).deleted_count
+    deleted_cycles = (await db.cycles.delete_many({"user_id": uid})).deleted_count
+    await db.email_verification_tokens.delete_many({"user_id": uid})
+    await db.password_reset_tokens.delete_many({"user_id": uid})
+    await db.users.delete_one({"id": uid})
+    response.delete_cookie("access_token", path="/")
+    return {
+        "ok": True,
+        "deleted_entries": deleted_entries,
+        "deleted_cycles": deleted_cycles,
+    }
 
 
 @api_router.post("/auth/logout")
@@ -1090,6 +1287,9 @@ async def startup():
     await db.email_verification_tokens.create_index("token_hash", unique=True)
     await db.email_verification_tokens.create_index("user_id")
     await db.email_verification_tokens.create_index("expires_at", expireAfterSeconds=0)
+    await db.password_reset_tokens.create_index("token_hash", unique=True)
+    await db.password_reset_tokens.create_index("user_id")
+    await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
     # Backfill: any existing user without the email_verified field gets False.
     # Existing accounts must verify before logging in again.
     await db.users.update_many(
