@@ -1,7 +1,7 @@
-/* Routier Facile — minimal PWA service worker.
-   Strategy: app-shell network-first for HTML; cache-first for hashed
-   static assets (JS/CSS/icons). API calls are NEVER cached. */
+/* Routier Facile — PWA service worker */
+
 const CACHE_NAME = "rf-shell-v1";
+
 const SHELL_ASSETS = [
   "/",
   "/manifest.json",
@@ -20,47 +20,56 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
     )
   );
   self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
-  const req = event.request;
-  if (req.method !== "GET") return;
-  const url = new URL(req.url);
-  // Never cache API calls — they must always hit the network.
+  const request = event.request;
+  if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+
+  // Never cache API calls
   if (url.pathname.startsWith("/api/")) return;
-  // Skip cross-origin requests (analytics, fonts) — let the browser handle them.
+
+  // Only handle same-origin files
   if (url.origin !== self.location.origin) return;
 
-  // Network-first for HTML navigations so users always get the latest shell.
-  if (req.mode === "navigate" || (req.headers.get("accept") || "").includes("text/html")) {
+  // HTML pages: network first
+  if (
+    request.mode === "navigate" ||
+    (request.headers.get("accept") || "").includes("text/html")
+  ) {
     event.respondWith(
-      fetch(req)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((c) => c.put(req, copy)).catch(() => null);
-          return res;
+      fetch(request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          return response;
         })
-        .catch(() => caches.match(req).then((r) => r || caches.match("/")))
+        .catch(() => caches.match(request).then((res) => res || caches.match("/")))
     );
     return;
   }
 
-  // Cache-first for static assets (hashed by CRA build).
+  // Static files: cache first
   event.respondWith(
-    caches.match(req).then((cached) => {
+    caches.match(request).then((cached) => {
       if (cached) return cached;
-      return fetch(req)
-        .then((res) => {
-          if (!res || res.status !== 200 || res.type !== "basic") return res;
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((c) => c.put(req, copy)).catch(() => null);
-          return res;
-        })
-        .catch(() => cached);
+
+      return fetch(request).then((response) => {
+        if (!response || response.status !== 200 || response.type !== "basic") {
+          return response;
+        }
+
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+
+        return response;
+      });
     })
   );
 });
