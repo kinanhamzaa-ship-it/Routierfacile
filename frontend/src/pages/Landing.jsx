@@ -9,7 +9,7 @@ const FEATURES = [
   { icon: Coffee, label: "Suivi des pauses",
     detail: "Règle des 4 h 30 / 45 min appliquée en direct, avec validation visuelle conforme à la réglementation européenne." },
   { icon: Bed, label: "Repos quotidien et hebdomadaire",
-    detail: "Détection des repos journaliers, hebdomadaires complets ou réduits — sans risquer la double comptabilité." },
+    detail: "Détecte automatiquement vos repos journaliers et hebdomadaires, sans erreurs de calcul." },
   { icon: ListBullets, label: "Historique",
     detail: "Retrouvez chaque journée, par cycle, par semaine ou par mois — éditables à tout moment." },
   { icon: FilePdf, label: "Export PDF mensuel",
