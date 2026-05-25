@@ -52,7 +52,7 @@ LEAVE_THRESHOLD_DAYS = 6  # >=6 consecutive inactive days create a leave-period 
 MAX_DAYS_PER_CYCLE = 6  # hard cap on working-day entries per (non-leave) cycle
 EMAIL_VERIFICATION_TTL_HOURS = 24
 EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
-PASSWORD_RESET_TTL_HOURS = 1
+PASSWORD_RESET_TTL_MINUTES = 30
 PASSWORD_RESET_RESEND_COOLDOWN_SECONDS = 60
 
 
@@ -271,21 +271,6 @@ def _verification_html_body(verify_url: str, name: Optional[str]) -> str:
     <p style="color:#A1A1AA;font-size:12px;margin-top:24px;">Ce lien expire dans {EMAIL_VERIFICATION_TTL_HOURS}h. Si vous n'êtes pas à l'origine de cette inscription, ignorez cet e-mail.</p>
   </div>
 </body></html>"""
-    msg.set_content(text_body)
-    msg.add_alternative(html_body, subtype="html")
-    context = ssl.create_default_context()
-    if smtp_port == 465:
-        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=60) as server:
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
-    else:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=60) as server:
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
-
 def _frontend_base_url() -> str:
     """Public frontend base URL used to build verification + reset links."""
     url = os.environ.get("FRONTEND_URL", "").strip() or os.environ.get("APP_BASE_URL", "").strip()
@@ -311,7 +296,7 @@ async def create_password_reset_token(user_id: str, email: str) -> str:
     raw_token = secrets_mod.token_urlsafe(32)
     token_hash = _hash_verification_token(raw_token)
     now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(hours=PASSWORD_RESET_TTL_HOURS)
+    expires_at = now + timedelta(minutes=PASSWORD_RESET_TTL_MINUTES)
     await db.password_reset_tokens.delete_many({"user_id": user_id})
     await db.password_reset_tokens.insert_one({
         "user_id": user_id,
@@ -347,7 +332,7 @@ def _reset_text_body(reset_url: str, name: Optional[str]) -> str:
         "Vous avez demandé à réinitialiser votre mot de passe sur Routier Facile. "
         "Ouvrez le lien ci-dessous pour choisir un nouveau mot de passe :\n\n"
         f"{reset_url}\n\n"
-        f"Ce lien expire dans {PASSWORD_RESET_TTL_HOURS}h.\n\n"
+        f"Ce lien expire dans {PASSWORD_RESET_TTL_MINUTES} minutes.\n\n"
         "Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail — "
         "votre mot de passe restera inchangé.\n\n"
         "— Routier Facile"
@@ -369,31 +354,22 @@ def _reset_html_body(reset_url: str, name: Optional[str]) -> str:
     </p>
     <p style="color:#A1A1AA;font-size:13px;">Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :</p>
     <p style="word-break:break-all;font-size:12px;color:#A1A1AA;"><a href="{reset_url}" style="color:#007AFF;">{reset_url}</a></p>
-    <p style="color:#A1A1AA;font-size:12px;margin-top:24px;">Ce lien expire dans {PASSWORD_RESET_TTL_HOURS}h. Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail.</p>
+    <p style="color:#A1A1AA;font-size:12px;margin-top:24px;">Ce lien expire dans {PASSWORD_RESET_TTL_MINUTES} minutes. Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail.</p>
   </div>
 </body></html>"""
 
 
-async def send_password_reset_email(to_email: str, raw_token: str, name: Optional[str]) -> None:
-    base_url = os.environ.get("APP_BASE_URL", "").strip("/")
-    reset_url = f"{base_url}/reset-password?token={raw_token}"
-
-    if not os.environ.get("BREVO_API_KEY", "").strip():
-        logging.warning(
-            "[email] BREVO_API_KEY not configured — would send password reset to %s | link=%s",
-            to_email, reset_url,
-        )
-        return
-
-    text_body = _reset_text_body(reset_url, name)
-    html_body = _reset_html_body(reset_url, name)
-
-    await _send_brevo_email(
+async def send_password_reset_email(to_email: str, raw_token: str, name: Optional[str]) -> bool:
+    """Send the password-reset link using the unified Brevo flow."""
+    return await _send_transactional_email(
         to_email=to_email,
+        name=name,
+        raw_token=raw_token,
+        path="/reset-password",
         subject="Réinitialisez votre mot de passe — Routier Facile",
-        text_body=text_body,
-        html_body=html_body,
-        recipient_name=name,
+        text_body_builder=_reset_text_body,
+        html_body_builder=_reset_html_body,
+        log_label="password_reset",
     )
 
 
