@@ -102,7 +102,7 @@ function MaxDaysModal({ prompt, onClose }) {
   return (
     <div
       data-testid="max-days-modal"
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center px-4"
+      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center px-4 pb-28 sm:pb-0"
       onClick={onClose}
     >
       <div
