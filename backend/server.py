@@ -660,32 +660,59 @@ async def maybe_close_cycle_on_leave_gap(user_id: str, new_entry_date: str) -> b
 
 
 async def reconcile_leave_cycles(user_id: str):
-    """Re-derive the user's leave-period cycles from the current entries.
-    Leave cycles are a pure projection of gaps >= LEAVE_THRESHOLD_DAYS between
-    consecutive entries:
-      - any stored leave cycle whose covered range no longer matches a current
-        gap is deleted;
-      - any current gap without a matching leave cycle gets one created.
-    Work (non-leave) cycles are NEVER touched here."""
-    entries = await db.entries.find(
-        {"user_id": user_id}, {"_id": 0, "date": 1}
-    ).sort("date", 1).to_list(length=10000)
+    """Maintain ONE relevant leave-period marker only.
+
+    Important business rule:
+    - The leave-period cycle exists only to protect the 90h / 2 consecutive
+      weeks comparison for the CURRENT cycle versus the PREVIOUS cycle.
+    - Therefore old back-dated gaps must NOT create leave cycles.
+    - A leave marker is valid only when the >=6 inactive days are immediately
+      before the first entry of the current open work cycle.
+    """
+    # Find the current open WORK cycle.
+    current_cycle = await db.cycles.find_one(
+        {
+            "user_id": user_id,
+            "ended_at": None,
+            "is_leave_period": {"$ne": True},
+        },
+        {"_id": 0},
+    )
 
     valid_gaps = {}  # (leave_start_date, leave_end_date) -> leave_days
-    for i in range(1, len(entries)):
-        py, pm, pd = [int(x) for x in entries[i - 1]["date"].split("-")]
-        cy, cm, cd = [int(x) for x in entries[i]["date"].split("-")]
-        prev_d = date_cls(py, pm, pd)
-        curr_d = date_cls(cy, cm, cd)
-        gap_days = (curr_d - prev_d).days - 1
-        if gap_days >= LEAVE_THRESHOLD_DAYS:
-            start = (prev_d + timedelta(days=1)).isoformat()
-            end = (curr_d - timedelta(days=1)).isoformat()
-            valid_gaps[(start, end)] = gap_days
 
+    if current_cycle:
+        first_current_entry = await db.entries.find_one(
+            {"user_id": user_id, "cycle_id": current_cycle["id"]},
+            {"_id": 0, "date": 1},
+            sort=[("date", 1)],
+        )
+
+        if first_current_entry:
+            prev_entry = await db.entries.find_one(
+                {"user_id": user_id, "date": {"$lt": first_current_entry["date"]}},
+                {"_id": 0, "date": 1},
+                sort=[("date", -1)],
+            )
+
+            if prev_entry:
+                py, pm, pd = [int(x) for x in prev_entry["date"].split("-")]
+                cy, cm, cd = [int(x) for x in first_current_entry["date"].split("-")]
+                prev_d = date_cls(py, pm, pd)
+                curr_d = date_cls(cy, cm, cd)
+                gap_days = (curr_d - prev_d).days - 1
+
+                if gap_days >= LEAVE_THRESHOLD_DAYS:
+                    start = (prev_d + timedelta(days=1)).isoformat()
+                    end = (curr_d - timedelta(days=1)).isoformat()
+                    valid_gaps[(start, end)] = gap_days
+
+    # Delete every stored leave cycle that is not the single currently relevant
+    # marker. This also cleans wrong old markers created by previous versions.
     existing = await db.cycles.find(
         {"user_id": user_id, "is_leave_period": True}, {"_id": 0}
     ).to_list(length=200)
+
     existing_keys = set()
     for lc in existing:
         key = (lc.get("leave_start_date"), lc.get("leave_end_date"))
@@ -698,6 +725,7 @@ async def reconcile_leave_cycles(user_id: str):
     for (start, end), days in valid_gaps.items():
         if (start, end) in existing_keys:
             continue
+
         leave_cyc = {
             "id": str(uuid.uuid4()),
             "user_id": user_id,
@@ -718,7 +746,6 @@ async def reconcile_leave_cycles(user_id: str):
             "decoucher_count": 0,
         }
         await db.cycles.insert_one(dict(leave_cyc))
-
 
 
 
