@@ -762,6 +762,49 @@ async def recompute_cycle_counters(cycle_id: str):
     )
 
 
+async def recalculate_next_entry_daily_rest_after_date(user_id: str, deleted_date: str) -> Optional[str]:
+    """After deleting an entry, the next chronological entry may now have a
+    different previous workday. Recompute its daily_rest_minutes and refresh
+    affected cycle counters.
+
+    Example: entries on 16/05, 17/05, 18/05. If 17/05 is deleted, 18/05 must
+    recompute its rest gap from 16/05 instead of keeping the old gap from 17/05.
+    Returns the updated next entry id, or None if there is no later entry."""
+    next_entry = await db.entries.find_one(
+        {"user_id": user_id, "date": {"$gt": deleted_date}},
+        {"_id": 0},
+        sort=[("date", 1)],
+    )
+    if not next_entry:
+        return None
+
+    prev_entry = await db.entries.find_one(
+        {"user_id": user_id, "date": {"$lt": next_entry["date"]}},
+        {"_id": 0},
+        sort=[("date", -1)],
+    )
+
+    daily_rest = None
+    if prev_entry:
+        daily_rest = max(
+            int((to_dt(next_entry["date"], next_entry["start_time"]) - end_dt(prev_entry)).total_seconds() // 60),
+            0,
+        )
+
+    await db.entries.update_one(
+        {"id": next_entry["id"], "user_id": user_id},
+        {"$set": {
+            "daily_rest_minutes": daily_rest,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+
+    if next_entry.get("cycle_id"):
+        await recompute_cycle_counters(next_entry["cycle_id"])
+
+    return next_entry["id"]
+
+
 # ============================================================
 # Auth endpoints
 @api_router.post("/auth/register", response_model=RegisterResponse)
@@ -1180,11 +1223,15 @@ async def delete_entry(entry_id: str, user: dict = Depends(get_current_user)):
                     )
                     await recompute_cycle_counters(prev["id"])
                     reverted_to_cycle = prev["id"]
+    updated_next_entry_id = await recalculate_next_entry_daily_rest_after_date(
+        user["id"], existing["date"]
+    )
     await reconcile_leave_cycles(user["id"])
     return {
         "ok": True,
         "reverted_to_cycle": reverted_to_cycle,
         "deleted_empty_cycle": deleted_empty_cycle,
+        "updated_next_entry_id": updated_next_entry_id,
     }
 
 
