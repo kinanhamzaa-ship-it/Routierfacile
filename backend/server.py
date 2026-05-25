@@ -117,13 +117,6 @@ BREVO_SENDER_EMAIL = "noreply@routierfacile.com"
 BREVO_SENDER_NAME = "Routier Facile"
 
 
-def _frontend_base_url() -> str:
-    """Public frontend base URL used to build verification + reset links.
-    Reads FRONTEND_URL first (preferred), then APP_BASE_URL for back-compat."""
-    url = os.environ.get("FRONTEND_URL", "").strip() or os.environ.get("APP_BASE_URL", "").strip()
-    return url.rstrip("/")
-
-
 async def _send_brevo_email(
     to_email: str,
     subject: str,
@@ -134,15 +127,15 @@ async def _send_brevo_email(
 ) -> bool:
     """Send a transactional email via the Brevo HTTP API.
     No-op (logged WARNING) when BREVO_API_KEY is unset (dev/preview).
-    Returns True on success, False on any failure. Never raises — failures
-    are logged so the caller flow never breaks."""
+    Raises nothing — failures are logged so caller flow never breaks."""
     api_key = os.environ.get("BREVO_API_KEY", "").strip()
     if not api_key:
         logging.warning(
-            "[brevo:%s] BREVO_API_KEY not configured — would send to %s | subject=%r",
-            log_label, to_email, subject,
+            "[email] BREVO_API_KEY not configured — would send to %s | subject=%r",
+            to_email, subject,
         )
-        return False
+        return
+    # Sender email/name can be overridden by env (mostly for staging tests).
     sender_email = os.environ.get("BREVO_SENDER_EMAIL", "").strip() or BREVO_SENDER_EMAIL
     sender_name = os.environ.get("BREVO_SENDER_NAME", "").strip() or BREVO_SENDER_NAME
     recipient = {"email": to_email}
@@ -166,29 +159,25 @@ async def _send_brevo_email(
             response = await client.post(BREVO_API_URL, headers=headers, json=payload)
     except httpx.RequestError as exc:
         logging.error(
-            "[brevo:%s] HTTP request failed for %s: %s",
-            log_label, to_email, exc, exc_info=True,
+            "[brevo] HTTP request failed for %s: %s",
+            to_email, exc, exc_info=True,
         )
-        return False
+        return
     if response.status_code >= 400:
         try:
             body = response.json()
         except ValueError:
             body = {"raw": response.text[:500]}
         logging.error(
-            "[brevo:%s] send failed status=%s to=%s sender=%s body=%s",
-            log_label, response.status_code, to_email, sender_email, body,
+            "[brevo] send failed status=%s to=%s body=%s",
+            response.status_code, to_email, body,
         )
-        return False
+        return
     try:
         message_id = response.json().get("messageId")
     except ValueError:
         message_id = None
-    logging.info(
-        "[brevo:%s] sent OK to=%s subject=%r messageId=%s",
-        log_label, to_email, subject, message_id,
-    )
-    return True
+    logging.info("[brevo] sent to=%s subject=%r messageId=%s", to_email, subject, message_id)
 
 
 async def _send_transactional_email(
@@ -273,14 +262,32 @@ def _verification_html_body(verify_url: str, name: Optional[str]) -> str:
     <p style="color:#A1A1AA;font-size:12px;margin-top:24px;">Ce lien expire dans {EMAIL_VERIFICATION_TTL_HOURS}h. Si vous n'êtes pas à l'origine de cette inscription, ignorez cet e-mail.</p>
   </div>
 </body></html>"""
+    msg.set_content(text_body)
+    msg.add_alternative(html_body, subtype="html")
+    context = ssl.create_default_context()
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=60) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=60) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
 
-
+def _frontend_base_url() -> str:
+    """Public frontend base URL used to build verification + reset links."""
+    url = os.environ.get("FRONTEND_URL", "").strip() or os.environ.get("APP_BASE_URL", "").strip()
+    return url.rstrip("/")
+    
 async def send_verification_email(to_email: str, raw_token: str, name: Optional[str]) -> bool:
-    """Send the email-verification link. Uses the EXACT same Brevo HTTP API
-    code path as `send_password_reset_email` (both go through
-    `_send_transactional_email` → `_send_brevo_email`)."""
+    """Send the email-verification link using the unified Brevo flow."""
     return await _send_transactional_email(
-        to_email=to_email, name=name, raw_token=raw_token,
+        to_email=to_email,
+        name=name,
+        raw_token=raw_token,
         path="/verify-email",
         subject="Vérifiez votre adresse e-mail — Routier Facile",
         text_body_builder=_verification_text_body,
@@ -358,17 +365,26 @@ def _reset_html_body(reset_url: str, name: Optional[str]) -> str:
 </body></html>"""
 
 
-async def send_password_reset_email(to_email: str, raw_token: str, name: Optional[str]) -> bool:
-    """Send the password-reset link. Uses the EXACT same Brevo HTTP API
-    code path as `send_verification_email` (both go through
-    `_send_transactional_email` → `_send_brevo_email`)."""
-    return await _send_transactional_email(
-        to_email=to_email, name=name, raw_token=raw_token,
-        path="/reset-password",
+async def send_password_reset_email(to_email: str, raw_token: str, name: Optional[str]) -> None:
+    base_url = os.environ.get("APP_BASE_URL", "").strip("/")
+    reset_url = f"{base_url}/reset-password?token={raw_token}"
+
+    if not os.environ.get("BREVO_API_KEY", "").strip():
+        logging.warning(
+            "[email] BREVO_API_KEY not configured — would send password reset to %s | link=%s",
+            to_email, reset_url,
+        )
+        return
+
+    text_body = _reset_text_body(reset_url, name)
+    html_body = _reset_html_body(reset_url, name)
+
+    await _send_brevo_email(
+        to_email=to_email,
         subject="Réinitialisez votre mot de passe — Routier Facile",
-        text_body_builder=_reset_text_body,
-        html_body_builder=_reset_html_body,
-        log_label="reset",
+        text_body=text_body,
+        html_body=html_body,
+        recipient_name=name,
     )
 
 
@@ -402,7 +418,6 @@ class AuthResponse(BaseModel):
 class RegisterResponse(BaseModel):
     email: str
     email_verified: bool = False
-    email_sent: bool = False
     message: str
 
 
@@ -778,18 +793,10 @@ async def register(payload: RegisterIn):
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
     raw_token = await create_email_verification_token(uid, email)
-    try:
-        sent = await send_verification_email(email, raw_token, display_name)
-    except Exception as exc:
-        # Defence-in-depth: send_verification_email already swallows exceptions
-        # and returns False, but re-catch here so the user's registration can
-        # never fail because of a transport blip.
-        logging.exception("[register] verification email send raised for %s: %s", email, exc)
-        sent = False
+    await send_verification_email(email, raw_token, display_name)
     return {
         "email": email,
         "email_verified": False,
-        "email_sent": bool(sent),
         "message": "Compte créé. Un e-mail de vérification vous a été envoyé.",
     }
 
