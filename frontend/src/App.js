@@ -14,6 +14,7 @@ import NewEntry from "./pages/NewEntry";
 import EditEntry from "./pages/EditEntry";
 import History from "./pages/History";
 import Monthly from "./pages/Monthly";
+import Landing from "./pages/Landing";
 import BottomNav from "./components/BottomNav";
 import { Toaster } from "./components/ui/sonner";
 
@@ -28,6 +29,21 @@ function Protected({ children }) {
     );
   if (!user) return <Navigate to="/login" state={{ from: loc }} replace />;
   return children;
+}
+
+function Home() {
+  // Public root: anonymous users land on the marketing page,
+  // authenticated users see the dashboard. While auth state is
+  // resolving (null) we show the same neutral spinner as Protected.
+  const { user } = useAuth();
+  if (user === null)
+    return (
+      <div className="rf-app-min-h-screen flex items-center justify-center text-rf-muted text-sm">
+        Chargement…
+      </div>
+    );
+  if (!user) return <Landing />;
+  return <Shell><Dashboard /></Shell>;
 }
 
 function Shell({ children }) {
@@ -59,14 +75,7 @@ function Router() {
           </Protected>
         }
       />
-      <Route
-        path="/"
-        element={
-          <Protected>
-            <Shell><Dashboard /></Shell>
-          </Protected>
-        }
-      />
+      <Route path="/" element={<Home />} />
       <Route
         path="/new"
         element={

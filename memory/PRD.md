@@ -147,6 +147,38 @@ Daily manual driving logbook + compliance dashboard. Drivers enter their work at
 - Regression: 25/25 email-flow tests + 70 prior tests still PASS.
 
 ## Update v10 (2026-02, Verification email + reset-link URL hardening)
+- Root cause of "reset link 404": link generation was using `APP_BASE_URL`
+  which on Render pointed at the backend. Switched to `FRONTEND_URL`
+  (preferred) with `APP_BASE_URL` as fallback. Helper:
+  `_frontend_base_url()`. Production value:
+  `FRONTEND_URL=https://www.routierfacile.com`.
+- Verification + reset are now 100% symmetric: both go through the same
+  `_send_transactional_email` → `_send_brevo_email` path. Per-flow
+  `try/except` wraps so unexpected exceptions cannot break the caller.
+- Stronger labelled logging:
+  `[brevo:verification|reset] dispatching… / sent OK… / send failed status=…`.
+- `register` returns `email_sent: bool` so the client knows whether the
+  email actually left the server.
+
+## Update v11 (2026-02, Public landing page at `/`)
+- New `Landing.jsx` page (mobile-first dark, same design tokens as the rest
+  of the app) shown at `/` for anonymous visitors. Logged-in users continue
+  straight to the Dashboard at `/` — handled by a new `<Home />` gate
+  that picks `<Landing />` vs `<Shell><Dashboard /></Shell>` based on auth
+  state, while showing the same neutral "Chargement…" spinner during the
+  brief auth-resolution window.
+- Hero: hero photo + `Truck` icon + "Votre carnet de route, simple." with
+  the required French tagline verbatim.
+- CTAs: primary "Créer un compte" → `/register`, ghost "Se connecter" →
+  `/login`. Repeated at the bottom of the page for one-tap conversion.
+- 6 feature cards exactly as requested: Calcul des heures, Suivi des
+  pauses, Repos quotidien et hebdomadaire, Historique, Export PDF, Adapté
+  mobile — each with an icon + short detail line.
+- Trust strip: "Conformité européenne · Sans publicité · Installable sur
+  mobile". Footer credit.
+- No backend, no auth, no cycle/PDF logic touched. ESLint clean. Smoke-
+  tested on iPhone (390×844) + desktop (1280×800). Zero Emergent badges
+  visible on the landing page.
 - **Root cause of "reset link 404"**: link generation was using
   `APP_BASE_URL` which on Render pointed at the backend (or was empty),
   yielding `<backend>/reset-password?...` which has no such route.
