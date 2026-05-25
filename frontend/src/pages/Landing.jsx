@@ -101,6 +101,21 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* Why Routier Facile */}
+      <section className="px-5 sm:px-8 pb-2 max-w-3xl mx-auto" data-testid="landing-why">
+        <div className="rf-label mb-2">Notre promesse</div>
+        <h2 className="font-display text-3xl sm:text-4xl tracking-tight">
+          Pourquoi Routier Facile&nbsp;?
+        </h2>
+        <p className="text-rf-muted text-base mt-3 max-w-xl" data-testid="landing-why-body">
+          Simple, rapide, pensé pour éviter les erreurs de calcul et garder une trace claire
+          de vos journées.
+        </p>
+        <p className="text-[13px] text-rf-muted/80 mt-4" data-testid="landing-trust-line">
+          Conçu pour les conducteurs routiers — sans publicité, lisible sur mobile.
+        </p>
+      </section>
+
       {/* Bottom CTA */}
       <section className="px-5 sm:px-8 pb-12 max-w-3xl mx-auto">
         <div className="rf-card p-6 sm:p-8 border border-rf-blue/30 bg-rf-blue/5">
