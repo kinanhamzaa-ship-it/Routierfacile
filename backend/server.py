@@ -29,6 +29,15 @@ db = client[os.environ['DB_NAME']]
 app = FastAPI(title="Routier Facile API")
 api_router = APIRouter(prefix="/api")
 
+
+@api_router.get("/health")
+async def health_check():
+    """Public, unauthenticated liveness probe. Used by UptimeRobot to keep
+    the Render free-tier backend awake. Must return HTTP 200 quickly without
+    touching MongoDB or any external service."""
+    return {"status": "ok"}
+
+
 JWT_ALGORITHM = "HS256"
 DAILY_DRIVING_EXTENSION_MIN = 9 * 60  # > 9h triggers extension counter
 DAILY_DRIVING_EXTENSION_MAX = 10 * 60
