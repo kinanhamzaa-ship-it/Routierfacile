@@ -762,47 +762,117 @@ async def recompute_cycle_counters(cycle_id: str):
     )
 
 
-async def recalculate_next_entry_daily_rest_after_date(user_id: str, deleted_date: str) -> Optional[str]:
-    """After deleting an entry, the next chronological entry may now have a
-    different previous workday. Recompute its daily_rest_minutes and refresh
-    affected cycle counters.
+async def rebuild_user_timeline(user_id: str):
+    """Canonical full chronological rebuild after ANY entry write.
 
-    Example: entries on 16/05, 17/05, 18/05. If 17/05 is deleted, 18/05 must
-    recompute its rest gap from 16/05 instead of keeping the old gap from 17/05.
-    Returns the updated next entry id, or None if there is no later entry."""
+    Why this exists:
+    - entries can be added/edited/deleted out of chronological order;
+    - therefore the previous/next rest gap, weekly rest split, cycle_id and
+      counters of ALL later entries may change.
+
+    This rebuilds non-leave work cycles from the current entries, then lets
+    reconcile_leave_cycles maintain leave-period marker cycles separately.
+    """
+    entries = await db.entries.find(
+        {"user_id": user_id}, {"_id": 0}
+    ).sort("date", 1).to_list(length=10000)
+
+    # Remove derived work cycles. Leave-period cycles are maintained separately
+    # by reconcile_leave_cycles and must not be deleted here.
+    await db.cycles.delete_many({
+        "user_id": user_id,
+        "is_leave_period": {"$ne": True},
+    })
+
+    if not entries:
+        await reconcile_leave_cycles(user_id)
+        return
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    current_cycle = None
+    previous_entry = None
+    touched_cycle_ids = set()
+
+    async def create_work_cycle(started_at: str) -> dict:
+        cyc = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "started_at": started_at,
+            "ended_at": None,
+            "reduced_rest_used": 0,
+            "extensions_used": 0,
+            "break_violations_count": 0,
+            "is_reduced_weekly_rest": False,
+        }
+        await db.cycles.insert_one(dict(cyc))
+        return cyc
+
+    for idx, entry in enumerate(entries):
+        daily_rest = None
+        split_before_this_entry = False
+        previous_rest_was_reduced_weekly = False
+
+        if previous_entry:
+            daily_rest = max(
+                int((to_dt(entry["date"], entry["start_time"]) - end_dt(previous_entry)).total_seconds() // 60),
+                0,
+            )
+            # Any qualifying weekly rest before this entry closes the previous
+            # work cycle and starts a fresh one for this entry.
+            if daily_rest >= WEEKLY_REST_FULL:
+                split_before_this_entry = True
+            elif daily_rest >= WEEKLY_REST_MIN:
+                split_before_this_entry = True
+                previous_rest_was_reduced_weekly = True
+
+        # Start first cycle, or split after weekly rest, or hard-split after
+        # max working days as a safety net.
+        if current_cycle is None:
+            current_cycle = await create_work_cycle(entry["date"] + "T00:00:00+00:00")
+        else:
+            current_count = await db.entries.count_documents({
+                "user_id": user_id,
+                "cycle_id": current_cycle["id"],
+            })
+            if split_before_this_entry or current_count >= MAX_DAYS_PER_CYCLE:
+                update = {"ended_at": now_iso}
+                if previous_rest_was_reduced_weekly:
+                    update["is_reduced_weekly_rest"] = True
+                await db.cycles.update_one({"id": current_cycle["id"]}, {"$set": update})
+                touched_cycle_ids.add(current_cycle["id"])
+                current_cycle = await create_work_cycle(entry["date"] + "T00:00:00+00:00")
+
+        await db.entries.update_one(
+            {"id": entry["id"], "user_id": user_id},
+            {"$set": {
+                "cycle_id": current_cycle["id"],
+                "daily_rest_minutes": daily_rest,
+                "updated_at": now_iso,
+            }},
+        )
+        touched_cycle_ids.add(current_cycle["id"])
+        previous_entry = {**entry, "cycle_id": current_cycle["id"], "daily_rest_minutes": daily_rest}
+
+    for cycle_id in touched_cycle_ids:
+        await recompute_cycle_counters(cycle_id)
+
+    await reconcile_leave_cycles(user_id)
+
+
+async def recalculate_next_entry_daily_rest_after_date(user_id: str, deleted_date: str) -> Optional[str]:
+    """Backward-compatible wrapper.
+
+    Older code called this after delete. The correct fix is now a full timeline
+    rebuild because adding/editing/deleting a back-dated entry can affect many
+    later entries, not just the immediate next one.
+    """
     next_entry = await db.entries.find_one(
         {"user_id": user_id, "date": {"$gt": deleted_date}},
         {"_id": 0},
         sort=[("date", 1)],
     )
-    if not next_entry:
-        return None
-
-    prev_entry = await db.entries.find_one(
-        {"user_id": user_id, "date": {"$lt": next_entry["date"]}},
-        {"_id": 0},
-        sort=[("date", -1)],
-    )
-
-    daily_rest = None
-    if prev_entry:
-        daily_rest = max(
-            int((to_dt(next_entry["date"], next_entry["start_time"]) - end_dt(prev_entry)).total_seconds() // 60),
-            0,
-        )
-
-    await db.entries.update_one(
-        {"id": next_entry["id"], "user_id": user_id},
-        {"$set": {
-            "daily_rest_minutes": daily_rest,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }},
-    )
-
-    if next_entry.get("cycle_id"):
-        await recompute_cycle_counters(next_entry["cycle_id"])
-
-    return next_entry["id"]
+    await rebuild_user_timeline(user_id)
+    return next_entry["id"] if next_entry else None
 
 
 # ============================================================
@@ -1128,9 +1198,10 @@ async def create_entry(payload: DailyEntryIn, user: dict = Depends(get_current_u
     })
     enrich_entry(doc)
     await db.entries.insert_one(dict(doc))
-    await recompute_cycle_counters(cyc["id"])
-    await reconcile_leave_cycles(user["id"])
-    return {k: v for k, v in doc.items() if k != "_id"}
+    await rebuild_user_timeline(user["id"])
+    fresh = await db.entries.find_one({"id": doc["id"], "user_id": user["id"]}, {"_id": 0})
+    enrich_entry(fresh)
+    return fresh
 
 
 @api_router.get("/entries")
@@ -1179,10 +1250,10 @@ async def update_entry(entry_id: str, payload: DailyEntryIn, user: dict = Depend
     await db.entries.update_one({"id": entry_id, "user_id": user["id"]}, {"$set": update})
     merged = {**existing, **update}
     enrich_entry(merged)
-    if existing.get("cycle_id"):
-        await recompute_cycle_counters(existing["cycle_id"])
-    await reconcile_leave_cycles(user["id"])
-    return merged
+    await rebuild_user_timeline(user["id"])
+    fresh = await db.entries.find_one({"id": entry_id, "user_id": user["id"]}, {"_id": 0})
+    enrich_entry(fresh)
+    return fresh
 
 
 @api_router.delete("/entries/{entry_id}")
@@ -1226,7 +1297,6 @@ async def delete_entry(entry_id: str, user: dict = Depends(get_current_user)):
     updated_next_entry_id = await recalculate_next_entry_daily_rest_after_date(
         user["id"], existing["date"]
     )
-    await reconcile_leave_cycles(user["id"])
     return {
         "ok": True,
         "reverted_to_cycle": reverted_to_cycle,
