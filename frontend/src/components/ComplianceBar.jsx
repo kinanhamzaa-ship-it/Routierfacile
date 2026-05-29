@@ -79,21 +79,9 @@ export default function ComplianceBar({ data }) {
 function DailyRestTile({ status, minutes }) {
   let dot = "bg-rf-muted";
   let txt = "—";
-
-  if (status === "ok") {
-    dot = "bg-rf-green";
-    txt = "OK";
-  } else if (status === "fractioned") {
-    dot = "bg-rf-green";
-    txt = "OK";
-  } else if (status === "reduced") {
-    dot = "bg-rf-orange";
-    txt = "Réduit";
-  } else if (status === "warning") {
-    dot = "bg-rf-red";
-    txt = "Alerte";
-  }
-
+  if (status === "ok") { dot = "bg-rf-green"; txt = "OK"; }
+  else if (status === "reduced") { dot = "bg-rf-orange"; txt = "Réduit"; }
+  else if (status === "warning") { dot = "bg-rf-red"; txt = "Alerte"; }
   return (
     <div className="rf-tile py-2 px-3" data-testid="indicator-rest">
       <div className="rf-label">Repos jour</div>
@@ -107,19 +95,8 @@ function DailyRestTile({ status, minutes }) {
 }
 
 function CounterTile({ label, value, max, testid }) {
-  const numericValue = Number(value || 0);
-  const numericMax = Number(max || 0);
-  const isReducedRest = label === "Repos réduits";
-
-  let color = "rf-green";
-
-  if (isReducedRest) {
-    color = numericValue > numericMax ? "rf-red" : numericValue > 0 ? "rf-orange" : "rf-green";
-  } else {
-    const pct = numericMax > 0 ? numericValue / numericMax : 0;
-    color = pct >= 1 ? "rf-red" : pct >= 0.66 ? "rf-orange" : "rf-green";
-  }
-
+  const pct = value / max;
+  const color = pct >= 1 ? "rf-red" : pct >= 0.66 ? "rf-orange" : "rf-green";
   return (
     <div className="rf-tile py-2 px-3" data-testid={testid}>
       <div className="rf-label">{label}</div>
