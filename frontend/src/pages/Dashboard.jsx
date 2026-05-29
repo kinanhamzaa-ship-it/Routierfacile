@@ -8,6 +8,29 @@ import {
   Plus, SignOut, ForkKnife, Bed, ChartBar, ClipboardText, Clock, Briefcase, Gauge, ArrowsClockwise, UserGear,
 } from "@phosphor-icons/react";
 
+function dailyRestColor(status) {
+  if (status === "ok" || status === "fractioned") return "rf-green";
+  if (status === "reduced") return "rf-orange";
+  return "rf-red";
+}
+
+function dailyRestBadgeClass(status) {
+  if (status === "ok" || status === "fractioned") return "bg-rf-green/20 text-rf-green";
+  if (status === "reduced") return "bg-rf-orange/20 text-rf-orange";
+  return "bg-rf-red/20 text-rf-red";
+}
+
+function dailyRestLabel(status) {
+  if (status === "ok") return "Repos normal";
+  if (status === "fractioned") return "Repos fractionné";
+  if (status === "reduced") return "Repos réduit";
+  return "< 9h Alerte";
+}
+
+function reducedRestClass(value) {
+  return Number(value || 0) > 3 ? "text-rf-red" : "text-rf-orange";
+}
+
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const [data, setData] = useState(null);
@@ -111,20 +134,20 @@ export default function Dashboard() {
             <div className="mt-3 rf-tile flex items-center justify-between" data-testid="today-daily-rest">
               <div>
                 <div className="rf-label">Repos journalier (depuis la veille)</div>
-                <div className={`font-display text-2xl tracking-tight mt-1 text-${
-                  latest.daily_rest_status === "ok" ? "rf-green" :
-                  latest.daily_rest_status === "reduced" ? "rf-orange" : "rf-red"
-                }`}>
+                <div className={`font-display text-2xl tracking-tight mt-1 text-${dailyRestColor(latest.daily_rest_status)}`}>
                   {minutesToHM(latest.daily_rest_minutes)}
                 </div>
               </div>
-              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                latest.daily_rest_status === "ok" ? "bg-rf-green/20 text-rf-green" :
-                latest.daily_rest_status === "reduced" ? "bg-rf-orange/20 text-rf-orange" : "bg-rf-red/20 text-rf-red"
-              }`}>
-                {latest.daily_rest_status === "ok" ? "OK ≥ 11h" :
-                 latest.daily_rest_status === "reduced" ? "Réduit 9-11h" : "< 9h Alerte"}
-              </span>
+              <div className="text-right">
+                <span className={`px-3 py-1 rounded-full text-xs font-medium ${dailyRestBadgeClass(latest.daily_rest_status)}`}>
+                  {dailyRestLabel(latest.daily_rest_status)}
+                </span>
+                {latest.daily_rest_status === "fractioned" && (
+                  <div className="text-[11px] text-rf-green mt-1">
+                    3h + 9h · considéré normal
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </section>
@@ -247,7 +270,7 @@ function PreviousCycleCard({ prev, current }) {
             </tr>
             <Row label="Conduite totale" prev={fmtH(prev.total_driving_minutes)} curr={fmtH(current.total_driving_minutes)} highlight />
             <Row label="Jours travaillés" prev={prev.days_worked} curr={current.days_worked} />
-            <Row label="Repos réduits" prev={`${prev.reduced_rest_used} / 3`} curr={`${current.reduced_rest_used} / 3`} />
+            <Row label="Repos réduits" prev={`${prev.reduced_rest_used} / 3`} curr={`${current.reduced_rest_used} / 3`} currClass={reducedRestClass(current.reduced_rest_used)} prevClass={reducedRestClass(prev.reduced_rest_used)} />
             <Row label="Extensions 10h" prev={`${prev.extensions_used} / 2`} curr={`${current.extensions_used} / 2`} />
             <Row label="Découcher" prev={prev.decoucher_count} curr={current.decoucher_count} />
           </tbody>
@@ -262,12 +285,12 @@ function PreviousCycleCard({ prev, current }) {
   );
 }
 
-function Row({ label, prev, curr, highlight }) {
+function Row({ label, prev, curr, highlight, prevClass = "", currClass = "" }) {
   return (
     <tr className="border-b border-rf-border last:border-b-0">
       <td className="px-4 py-2 text-rf-muted">{label}</td>
-      <td className="px-3 py-2 text-right tabular-nums">{prev}</td>
-      <td className={`px-4 py-2 text-right font-medium tabular-nums ${highlight ? "text-rf-blue" : ""}`}>{curr}</td>
+      <td className={`px-3 py-2 text-right tabular-nums ${prevClass}`}>{prev}</td>
+      <td className={`px-4 py-2 text-right font-medium tabular-nums ${highlight ? "text-rf-blue" : currClass}`}>{curr}</td>
     </tr>
   );
 }
