@@ -45,6 +45,8 @@ WEEKLY_REST_FULL = 45 * 60  # >= 45h => weekly rest
 WEEKLY_REST_MIN = 24 * 60   # 24-45h => reduced weekly rest candidate
 DAILY_REST_OK = 11 * 60
 DAILY_REST_REDUCED = 9 * 60
+FRACTIONED_REST_MIN_BREAK = 3 * 60  # 3h continuous break inside the workday
+FRACTIONED_REST_MIN_FOLLOWING_REST = 9 * 60  # 9h following rest after the workday
 MAX_CONSECUTIVE_DRIVING = 4 * 60 + 30  # 4h30 before mandatory break
 MIN_QUALIFYING_BREAK = 45  # minutes total to reset driving counter
 MIN_SECOND_SPLIT_BREAK = 30  # at least one break of 30+ min within split
@@ -535,9 +537,19 @@ def enrich_entry(doc: dict) -> dict:
     doc["total_rest_minutes"] = rest
     doc["total_working_minutes"] = working
     doc["amplitude_minutes"] = amp
-    # daily_rest_status from already-stored daily_rest_minutes
+    # Fractioned daily rest first part: one continuous break of at least 3h.
+    # Do not sum several smaller breaks (e.g. 1h30 + 1h30 is NOT valid).
+    doc["has_fractioned_rest_part"] = any(
+        int(b) >= FRACTIONED_REST_MIN_BREAK for b in doc.get("rest_breaks", [])
+    )
+
+    # daily_rest_status from already-stored daily_rest_minutes.
+    # "fractioned" is legally treated like a normal daily rest, so it must not
+    # increment the reduced-rest counter.
     dr = doc.get("daily_rest_minutes")
-    if dr is None:
+    if doc.get("is_fractioned_rest"):
+        doc["daily_rest_status"] = "fractioned"
+    elif dr is None:
         doc["daily_rest_status"] = None
     elif dr >= DAILY_REST_OK:
         doc["daily_rest_status"] = "ok"
@@ -836,6 +848,7 @@ async def rebuild_user_timeline(user_id: str):
 
     for idx, entry in enumerate(entries):
         daily_rest = None
+        is_fractioned_rest = False
         split_before_this_entry = False
         previous_rest_was_reduced_weekly = False
 
@@ -844,6 +857,20 @@ async def rebuild_user_timeline(user_id: str):
                 int((to_dt(entry["date"], entry["start_time"]) - end_dt(previous_entry)).total_seconds() // 60),
                 0,
             )
+
+            previous_has_fractioned_part = any(
+                int(b) >= FRACTIONED_REST_MIN_BREAK
+                for b in previous_entry.get("rest_breaks", [])
+            )
+            # Split daily rest: one continuous 3h+ break during the previous
+            # workday + at least 9h following rest. It is NOT a reduced rest.
+            # If the following rest is already 11h+, keep the normal "ok" status.
+            if (
+                previous_has_fractioned_part
+                and FRACTIONED_REST_MIN_FOLLOWING_REST <= daily_rest < DAILY_REST_OK
+            ):
+                is_fractioned_rest = True
+
             # Any qualifying weekly rest before this entry closes the previous
             # work cycle and starts a fresh one for this entry.
             if daily_rest >= WEEKLY_REST_FULL:
@@ -874,11 +901,17 @@ async def rebuild_user_timeline(user_id: str):
             {"$set": {
                 "cycle_id": current_cycle["id"],
                 "daily_rest_minutes": daily_rest,
+                "is_fractioned_rest": is_fractioned_rest,
                 "updated_at": now_iso,
             }},
         )
         touched_cycle_ids.add(current_cycle["id"])
-        previous_entry = {**entry, "cycle_id": current_cycle["id"], "daily_rest_minutes": daily_rest}
+        previous_entry = {
+            **entry,
+            "cycle_id": current_cycle["id"],
+            "daily_rest_minutes": daily_rest,
+            "is_fractioned_rest": is_fractioned_rest,
+        }
 
     for cycle_id in touched_cycle_ids:
         await recompute_cycle_counters(cycle_id)
