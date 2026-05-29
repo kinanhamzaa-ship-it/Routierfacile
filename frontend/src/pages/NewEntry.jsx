@@ -17,7 +17,17 @@ export default function NewEntry() {
     setSubmitting(true);
     try {
       await api.post("/entries", data);
+      const hasFractionedRestPart = data.rest_breaks?.some((b) => Number(b) >= 180);
+
       toast.success("Journée enregistrée");
+
+      if (hasFractionedRestPart) {
+        toast.info(
+          "Repos journalier fractionné détecté. Votre prochain repos devra être d’au moins 9h et sera considéré comme un repos normal.",
+          { duration: 8000 }
+        );
+      }
+
       nav("/", { replace: true });
     } catch (e) {
       const detail = e.response?.data?.detail;
