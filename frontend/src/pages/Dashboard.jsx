@@ -27,9 +27,6 @@ function dailyRestLabel(status) {
   return "< 9h Alerte";
 }
 
-function reducedRestClass(value) {
-  return Number(value || 0) > 3 ? "text-rf-red" : "text-rf-orange";
-}
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -270,7 +267,7 @@ function PreviousCycleCard({ prev, current }) {
             </tr>
             <Row label="Conduite totale" prev={fmtH(prev.total_driving_minutes)} curr={fmtH(current.total_driving_minutes)} highlight />
             <Row label="Jours travaillés" prev={prev.days_worked} curr={current.days_worked} />
-            <Row label="Repos réduits" prev={`${prev.reduced_rest_used} / 3`} curr={`${current.reduced_rest_used} / 3`} currClass={reducedRestClass(current.reduced_rest_used)} prevClass={reducedRestClass(prev.reduced_rest_used)} />
+            <Row label="Repos réduits" prev={`${prev.reduced_rest_used} / 3`} curr={`${current.reduced_rest_used} / 3`} />
             <Row label="Extensions 10h" prev={`${prev.extensions_used} / 2`} curr={`${current.extensions_used} / 2`} />
             <Row label="Découcher" prev={prev.decoucher_count} curr={current.decoucher_count} />
           </tbody>
@@ -285,12 +282,12 @@ function PreviousCycleCard({ prev, current }) {
   );
 }
 
-function Row({ label, prev, curr, highlight, prevClass = "", currClass = "" }) {
+function Row({ label, prev, curr, highlight }) {
   return (
     <tr className="border-b border-rf-border last:border-b-0">
       <td className="px-4 py-2 text-rf-muted">{label}</td>
-      <td className={`px-3 py-2 text-right tabular-nums ${prevClass}`}>{prev}</td>
-      <td className={`px-4 py-2 text-right font-medium tabular-nums ${highlight ? "text-rf-blue" : currClass}`}>{curr}</td>
+      <td className="px-3 py-2 text-right tabular-nums">{prev}</td>
+      <td className={`px-4 py-2 text-right font-medium tabular-nums ${highlight ? "text-rf-blue" : ""}`}>{curr}</td>
     </tr>
   );
 }
