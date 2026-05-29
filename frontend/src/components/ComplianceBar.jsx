@@ -80,6 +80,25 @@ function DailyRestTile({ status, minutes }) {
   let dot = "bg-rf-muted";
   let txt = "—";
   if (status === "ok") { dot = "bg-rf-green"; txt = "OK"; }
+    let dot = "bg-rf-muted";
+let txt = "—";
+
+if (status === "ok") {
+  dot = "bg-rf-green";
+  txt = "OK";
+}
+else if (status === "fractioned") {
+  dot = "bg-rf-green";
+  txt = "OK";
+}
+else if (status === "reduced") {
+  dot = "bg-rf-orange";
+  txt = "Réduit";
+}
+else if (status === "warning") {
+  dot = "bg-rf-red";
+  txt = "Alerte";
+}
   else if (status === "reduced") { dot = "bg-rf-orange"; txt = "Réduit"; }
   else if (status === "warning") { dot = "bg-rf-red"; txt = "Alerte"; }
   return (
