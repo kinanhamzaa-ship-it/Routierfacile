@@ -442,6 +442,12 @@ class AdminUpdatePlanIn(BaseModel):
     plan: PlanType
 
 
+class ReviewIn(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    name: Optional[str] = None
+    comment: Optional[str] = Field(default="", max_length=500)
+
+
 MealStatus = Literal["yes", "no", "unsure"]
 
 
@@ -1237,6 +1243,97 @@ async def admin_update_user_plan(
     return updated
 
 
+
+# ============================================================
+# Public reviews endpoints
+@api_router.post("/reviews")
+async def create_review(payload: ReviewIn, request: Request):
+    """Public review submission.
+
+    One browser/IP can update its latest review instead of creating unlimited
+    duplicate reviews. This keeps the public average useful while still allowing
+    a driver to correct their rating later.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    client_host = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("User-Agent", "")[:200]
+    fingerprint_raw = f"{client_host}|{user_agent}"
+    fingerprint = hashlib.sha256(fingerprint_raw.encode("utf-8")).hexdigest()
+
+    clean_name = (payload.name or "").strip()[:80]
+    clean_comment = (payload.comment or "").strip()[:500]
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "rating": payload.rating,
+        "name": clean_name or "Conducteur",
+        "comment": clean_comment,
+        "fingerprint": fingerprint,
+        "approved": True,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    existing = await db.reviews.find_one({"fingerprint": fingerprint}, {"_id": 0})
+    if existing:
+        await db.reviews.update_one(
+            {"id": existing["id"]},
+            {"$set": {
+                "rating": payload.rating,
+                "name": clean_name or existing.get("name") or "Conducteur",
+                "comment": clean_comment,
+                "approved": True,
+                "updated_at": now,
+            }},
+        )
+        updated = await db.reviews.find_one({"id": existing["id"]}, {"_id": 0, "fingerprint": 0})
+        return updated
+
+    await db.reviews.insert_one(dict(doc))
+    doc.pop("fingerprint", None)
+    return doc
+
+
+@api_router.get("/reviews/stats")
+async def review_stats():
+    """Public average rating and count for landing page."""
+    pipeline = [
+        {"$match": {"approved": True}},
+        {"$group": {
+            "_id": None,
+            "count": {"$sum": 1},
+            "average": {"$avg": "$rating"},
+        }},
+    ]
+    agg = await db.reviews.aggregate(pipeline).to_list(length=1)
+
+    if not agg:
+        return {
+            "count": 0,
+            "average": 5.0,
+            "average_display": "5.0",
+        }
+
+    average = round(float(agg[0].get("average", 5.0)), 1)
+    return {
+        "count": int(agg[0].get("count", 0)),
+        "average": average,
+        "average_display": f"{average:.1f}",
+    }
+
+
+@api_router.get("/reviews")
+async def list_reviews(limit: int = 6):
+    """Public latest approved reviews for landing page."""
+    limit = max(1, min(limit, 20))
+    reviews = await db.reviews.find(
+        {"approved": True},
+        {"_id": 0, "fingerprint": 0},
+    ).sort("updated_at", -1).limit(limit).to_list(length=limit)
+
+    return reviews
+
+
 # ============================================================
 # Detection
 @api_router.post("/cycles/detect-rest")
@@ -1660,6 +1757,8 @@ async def startup():
     await db.password_reset_tokens.create_index("token_hash", unique=True)
     await db.password_reset_tokens.create_index("user_id")
     await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
+    await db.reviews.create_index("fingerprint", unique=True)
+    await db.reviews.create_index([("approved", 1), ("updated_at", -1)])
     # Backfill: any existing user without the email_verified field gets False.
     # Existing accounts must verify before logging in again.
     await db.users.update_many(
