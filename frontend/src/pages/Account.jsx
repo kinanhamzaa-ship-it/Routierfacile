@@ -195,7 +195,7 @@ export default function Account() {
             <div className="flex-1">
               <div className="rf-label">À propos</div>
               <div className="font-display text-xl mt-1">Routier Facile</div>
-              <div className="text-rf-muted text-sm mt-1">Version 1.0</div>
+              <div className="text-rf-muted text-sm mt-1">Version 1.1.0</div>
               <p className="text-rf-muted text-xs mt-3">
                 Application pensée pour aider les conducteurs routiers à suivre leurs journées,
                 leurs repos et leurs alertes de conformité.
