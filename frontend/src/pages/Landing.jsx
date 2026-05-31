@@ -72,7 +72,35 @@ export default function Landing() {
           </div>
         </div>
       </header>
+<section className="px-5 sm:px-8 pb-6 max-w-3xl mx-auto">
+  <div className="rf-card p-6 border border-rf-blue/30 bg-rf-blue/5">
+    <div className="rf-label">Installation</div>
 
+    <h2 className="font-display text-2xl mt-2">
+      Installer Routier Facile
+    </h2>
+
+    <p className="text-rf-muted text-sm mt-3">
+      Installez l'application sur votre téléphone pour un accès rapide depuis votre écran d'accueil.
+    </p>
+
+    <div className="mt-4 text-sm space-y-3">
+      <div>
+        <strong>Android :</strong><br />
+        Ouvrez le menu ⋮ de votre navigateur puis choisissez
+        <strong> Ajouter à l'écran d'accueil</strong>.
+      </div>
+
+      <div>
+        <strong>iPhone :</strong><br />
+        Appuyez sur <strong>Partager</strong> puis
+        <strong> Sur l'écran d'accueil</strong>.
+      </div>
+    </div>
+  </div>
+</section>
+
+{/* Features */}
       {/* Features */}
       <section className="px-5 sm:px-8 py-10 max-w-3xl mx-auto" data-testid="landing-features">
         <div className="rf-label mb-2">Ce que fait l'application</div>
