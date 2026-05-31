@@ -63,27 +63,52 @@ export default function Admin() {
             <div className="font-medium">{u.name || "Sans nom"}</div>
             <div className="text-sm opacity-70">{u.email}</div>
 
-            <div className="text-xs mt-1 opacity-70">
-              Plan actuel : {u.plan || "free"}
+            <div className="mt-2">
+              <span
+                className={`inline-block px-2 py-1 rounded text-xs font-medium ${
+                  u.plan === "admin"
+                    ? "bg-rf-blue/20 text-rf-blue"
+                    : u.plan === "premium"
+                    ? "bg-green-500/20 text-green-400"
+                    : "bg-white/10 text-white/70"
+                }`}
+              >
+                {u.plan || "free"}
+              </span>
             </div>
 
-            <div className="flex gap-2 mt-3">
+            <div className="flex gap-2 mt-3 flex-wrap">
               <button
-                className="rf-btn-secondary"
+                className={`px-3 py-1 rounded text-sm ${
+                  u.plan === "free"
+                    ? "bg-white text-black"
+                    : "bg-white/10"
+                }`}
+                disabled={u.plan === "free"}
                 onClick={() => changePlan(u.id, "free")}
               >
                 Free
               </button>
 
               <button
-                className="rf-btn-secondary"
+                className={`px-3 py-1 rounded text-sm ${
+                  u.plan === "premium"
+                    ? "bg-green-500 text-black"
+                    : "bg-green-500/20 text-green-400"
+                }`}
+                disabled={u.plan === "premium"}
                 onClick={() => changePlan(u.id, "premium")}
               >
                 Premium
               </button>
 
               <button
-                className="rf-btn-secondary"
+                className={`px-3 py-1 rounded text-sm ${
+                  u.plan === "admin"
+                    ? "bg-rf-blue text-white"
+                    : "bg-rf-blue/20 text-rf-blue"
+                }`}
+                disabled={u.plan === "admin"}
                 onClick={() => changePlan(u.id, "admin")}
               >
                 Admin
