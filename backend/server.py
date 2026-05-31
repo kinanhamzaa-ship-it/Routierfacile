@@ -383,6 +383,7 @@ class UserOut(BaseModel):
     email: str
     name: Optional[str] = None
     role: str = "driver"
+    plan: str = "free"
     email_verified: bool = False
 
 
@@ -947,6 +948,7 @@ async def register(payload: RegisterIn):
     await db.users.insert_one({
         "id": uid, "email": email, "password_hash": hash_password(payload.password),
         "name": display_name, "role": "driver",
+        "plan": "free",
         "email_verified": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
@@ -980,6 +982,7 @@ async def login(payload: LoginIn, response: Response):
         "user": {
             "id": user["id"], "email": email, "name": user.get("name"),
             "role": user.get("role", "driver"),
+            "plan": user.get("plan", "free"),
             "email_verified": True,
         },
         "token": token,
@@ -1124,6 +1127,7 @@ async def me(user: dict = Depends(get_current_user)):
     return {
         "id": user["id"], "email": user["email"], "name": user.get("name"),
         "role": user.get("role", "driver"),
+        "plan": user.get("plan", "free"),
         "email_verified": user.get("email_verified", False),
     }
 
@@ -1557,6 +1561,10 @@ async def startup():
         {"email_verified": {"$exists": False}},
         {"$set": {"email_verified": False}},
     )
+    await db.users.update_many(
+        {"plan": {"$exists": False}},
+        {"$set": {"plan": "free"}},
+    )
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@routier-facile.fr")
     admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")
     existing = await db.users.find_one({"email": admin_email})
@@ -1565,6 +1573,7 @@ async def startup():
             "id": str(uuid.uuid4()), "email": admin_email,
             "password_hash": hash_password(admin_password),
             "name": "Admin", "role": "admin",
+            "plan": "admin",
             "email_verified": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
@@ -1576,6 +1585,8 @@ async def startup():
         # we don't lock ourselves out when the seed mailbox isn't real.
         if not existing.get("email_verified"):
             updates["email_verified"] = True
+        if existing.get("plan") != "admin":
+            updates["plan"] = "admin"
         if updates:
             await db.users.update_one({"email": admin_email}, {"$set": updates})
 
