@@ -12,6 +12,7 @@ export default function NewEntry() {
   const [pendingPayload, setPendingPayload] = useState(null);
   const [detection, setDetection] = useState(null);
   const [maxDaysPrompt, setMaxDaysPrompt] = useState(null); // { payload, maxDays }
+  const [cardReminderOpen, setCardReminderOpen] = useState(false);
 
   const persist = async (data) => {
     setSubmitting(true);
@@ -21,13 +22,6 @@ export default function NewEntry() {
 
       toast.success("Journée enregistrée");
 
-      setTimeout(() => {
-        toast.info(
-          "Pensez à retirer votre carte. Bon repos.",
-          { duration: 7000 }
-        );
-      }, 500);
-
       if (hasFractionedRestPart) {
         toast.info(
           "Repos journalier fractionné détecté. Votre prochain repos devra être d’au moins 9h et sera considéré comme un repos normal.",
@@ -35,7 +29,7 @@ export default function NewEntry() {
         );
       }
 
-      nav("/", { replace: true });
+      setCardReminderOpen(true);
     } catch (e) {
       const detail = e.response?.data?.detail;
       if (detail && typeof detail === "object" && detail.code === "cycle_max_days_reached") {
@@ -109,6 +103,46 @@ export default function NewEntry() {
       {maxDaysPrompt && (
         <MaxDaysModal prompt={maxDaysPrompt} onClose={() => setMaxDaysPrompt(null)} />
       )}
+
+      {cardReminderOpen && (
+        <CardReminderModal
+          onClose={() => {
+            setCardReminderOpen(false);
+            nav("/", { replace: true });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CardReminderModal({ onClose }) {
+  return (
+    <div
+      data-testid="card-reminder-modal"
+      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center px-4"
+      onClick={onClose}
+    >
+      <div
+        className="rf-card max-w-sm w-full p-6 text-center"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-4xl mb-3">💳</div>
+        <div className="rf-label text-rf-blue">Rappel</div>
+        <h2 className="font-display text-2xl mt-2">
+          Pensez à retirer votre carte
+        </h2>
+        <p className="text-sm text-rf-muted mt-3">
+          Bon repos.
+        </p>
+        <button
+          data-testid="card-reminder-acknowledge"
+          onClick={onClose}
+          className="rf-btn-primary w-full mt-5"
+        >
+          J’ai compris
+        </button>
+      </div>
     </div>
   );
 }
