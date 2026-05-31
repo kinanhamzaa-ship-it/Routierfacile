@@ -13,6 +13,7 @@ import {
   Info,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
+import api from "../lib/api";
 
 function getPlanLabel(plan) {
   if (plan === "admin") return "Admin";
@@ -33,6 +34,9 @@ export default function Account() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
   const plan = user?.plan || "free";
   const planLabel = getPlanLabel(plan);
@@ -55,6 +59,29 @@ export default function Account() {
       nav("/login", { replace: true });
     } else {
       setError(r.message || "Échec de la suppression.");
+    }
+  };
+
+  const handleReviewSubmit = async (e) => {
+    e.preventDefault();
+
+    try {
+      setReviewSubmitting(true);
+
+      await api.post("/reviews", {
+        rating: reviewRating,
+        name: user?.name || user?.email || "Conducteur",
+        comment: reviewComment,
+      });
+
+      toast.success("Merci pour votre avis !");
+      setReviewComment("");
+      setReviewRating(5);
+    } catch (err) {
+      console.error(err);
+      toast.error("Impossible d'envoyer votre avis pour le moment.");
+    } finally {
+      setReviewSubmitting(false);
     }
   };
 
@@ -186,6 +213,58 @@ export default function Account() {
             </div>
           </div>
         </div>
+      </section>
+
+      <section className="px-4 mt-4">
+        <form onSubmit={handleReviewSubmit} className="rf-card p-4">
+          <div className="rf-label">Votre avis</div>
+
+          <div className="font-display text-2xl mt-1">
+            Évaluez Routier Facile
+          </div>
+
+          <p className="text-rf-muted text-sm mt-2">
+            Votre retour nous aide à améliorer l'application.
+          </p>
+
+          <div className="grid grid-cols-5 gap-2 mt-4">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setReviewRating(n)}
+                className={`rounded-xl py-3 text-xl border ${
+                  n <= reviewRating
+                    ? "border-rf-blue/50 bg-rf-blue/15"
+                    : "border-rf-border bg-rf-elevated/40 opacity-60"
+                }`}
+                aria-label={`${n} étoile${n > 1 ? "s" : ""}`}
+              >
+                ⭐
+              </button>
+            ))}
+          </div>
+
+          <div className="text-rf-muted text-xs mt-2">
+            Note sélectionnée : {reviewRating}/5
+          </div>
+
+          <textarea
+            className="rf-input w-full mt-4 min-h-[90px]"
+            placeholder="Votre commentaire (optionnel)..."
+            value={reviewComment}
+            onChange={(e) => setReviewComment(e.target.value)}
+            maxLength={500}
+          />
+
+          <button
+            type="submit"
+            disabled={reviewSubmitting}
+            className="rf-btn-primary w-full mt-4 disabled:opacity-50"
+          >
+            {reviewSubmitting ? "Envoi..." : "Envoyer mon avis"}
+          </button>
+        </form>
       </section>
 
       <section className="px-4 mt-4">
