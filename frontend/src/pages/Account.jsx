@@ -143,17 +143,25 @@ export default function Account() {
           <div className="flex items-start gap-3">
             <Database size={28} weight="duotone" className="text-rf-blue shrink-0 mt-0.5" />
             <div className="flex-1">
-              <div className="rf-label">Sauvegarde</div>
+              <div className="rf-label">Synchronisation Cloud</div>
+
               <p className="text-rf-muted text-sm mt-2">
-                La sauvegarde et la restauration des données seront ajoutées dans une prochaine étape.
+                Vos données sont automatiquement synchronisées avec votre compte.
               </p>
-              <div className="grid grid-cols-1 gap-2 mt-4">
-                <button type="button" className="rf-btn-ghost w-full opacity-60 cursor-not-allowed" disabled>
-                  Exporter mes données
-                </button>
-                <button type="button" className="rf-btn-ghost w-full opacity-60 cursor-not-allowed" disabled>
-                  Importer une sauvegarde
-                </button>
+
+              <p className="text-rf-muted text-sm mt-3">
+                Connectez-vous simplement sur un autre appareil pour retrouver vos journées,
+                cycles et statistiques.
+              </p>
+
+              <div className="mt-4 rounded-xl border border-rf-blue/20 bg-rf-blue/5 p-3">
+                <div className="text-rf-blue text-sm font-medium">
+                  Synchronisation active
+                </div>
+
+                <div className="text-rf-muted text-xs mt-1">
+                  Les données sont enregistrées automatiquement sur le cloud.
+                </div>
               </div>
             </div>
           </div>
