@@ -21,6 +21,13 @@ export default function NewEntry() {
 
       toast.success("Journée enregistrée");
 
+      setTimeout(() => {
+        toast.info(
+          "Pensez à retirer votre carte. Bon repos.",
+          { duration: 7000 }
+        );
+      }, 500);
+
       if (hasFractionedRestPart) {
         toast.info(
           "Repos journalier fractionné détecté. Votre prochain repos devra être d’au moins 9h et sera considéré comme un repos normal.",
