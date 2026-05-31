@@ -110,6 +110,21 @@ export default function Account() {
                 </span>
               </div>
 
+              
+              {plan === "admin" && (
+                <div className="mt-4 rounded-xl border border-rf-blue/30 bg-rf-blue/10 p-3">
+                  <div className="text-sm font-medium text-rf-blue">
+                    Administration
+                  </div>
+                  <button
+                    onClick={() => nav("/admin")}
+                    className="rf-btn-primary w-full mt-3"
+                  >
+                    Ouvrir le panneau Admin
+                  </button>
+                </div>
+              )}
+
               {plan === "free" && (
                 <div className="mt-4 rounded-xl border border-rf-border bg-rf-elevated/40 p-3">
                   <div className="text-sm font-medium">Premium bientôt disponible</div>
