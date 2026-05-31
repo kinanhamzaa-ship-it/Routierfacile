@@ -4,6 +4,7 @@ import api from "../lib/api";
 export default function Admin() {
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
+  const [successMessage, setSuccessMessage] = useState("");
 
   useEffect(() => {
     loadData();
@@ -18,8 +19,19 @@ export default function Admin() {
   }
 
   async function changePlan(userId, plan) {
-    await api.patch(`/admin/users/${userId}/plan`, { plan });
-    loadData();
+    try {
+      await api.patch(`/admin/users/${userId}/plan`, { plan });
+
+      setSuccessMessage(`✓ Plan changé vers ${plan}`);
+
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 2500);
+
+      loadData();
+    } catch (err) {
+      console.error(err);
+    }
   }
 
   if (!stats) {
@@ -34,6 +46,12 @@ export default function Admin() {
     <div className="px-4 pt-5">
       <div className="rf-label">Administration</div>
       <h1 className="font-display text-3xl mt-1">Admin Panel</h1>
+
+      {successMessage && (
+        <div className="mt-4 rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-green-400">
+          {successMessage}
+        </div>
+      )}
 
       <div className="rf-card p-4 mt-4">
         <div className="rf-label">Utilisateurs</div>
