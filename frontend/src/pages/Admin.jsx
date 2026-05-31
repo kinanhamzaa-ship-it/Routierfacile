@@ -5,6 +5,7 @@ export default function Admin() {
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
   const [successMessage, setSuccessMessage] = useState("");
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     loadData();
@@ -73,7 +74,24 @@ export default function Admin() {
       <div className="rf-card p-4 mt-4">
         <div className="rf-label mb-3">Tous les utilisateurs</div>
 
-        {users.map((u) => (
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Rechercher un utilisateur..."
+          className="rf-input w-full mb-4"
+        />
+
+        {users
+          .filter((u) => {
+            const q = search.toLowerCase();
+            return (
+              !q ||
+              (u.name || "").toLowerCase().includes(q) ||
+              (u.email || "").toLowerCase().includes(q)
+            );
+          })
+          .map((u) => (
           <div
             key={u.id}
             className="border-b border-white/10 py-3"
