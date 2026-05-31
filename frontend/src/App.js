@@ -15,6 +15,7 @@ import EditEntry from "./pages/EditEntry";
 import History from "./pages/History";
 import Monthly from "./pages/Monthly";
 import Landing from "./pages/Landing";
+import Admin from "./pages/Admin";
 import BottomNav from "./components/BottomNav";
 import { Toaster } from "./components/ui/sonner";
 
@@ -108,6 +109,16 @@ function Router() {
           </Protected>
         }
       />
+      <Route
+  path="/admin"
+  element={
+    <Protected>
+      <Shell>
+        <Admin />
+      </Shell>
+    </Protected>
+  }
+/>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
