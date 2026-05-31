@@ -101,7 +101,6 @@ export default function Landing() {
 </section>
 
 {/* Features */}
-      {/* Features */}
       <section className="px-5 sm:px-8 py-10 max-w-3xl mx-auto" data-testid="landing-features">
         <div className="rf-label mb-2">Ce que fait l'application</div>
         <h2 className="font-display text-3xl sm:text-4xl tracking-tight mb-6">
@@ -142,6 +141,35 @@ export default function Landing() {
         <p className="text-[13px] text-rf-muted/80 mt-4" data-testid="landing-trust-line">
           Conçu pour les conducteurs routiers — sans publicité, lisible sur mobile.
         </p>
+      </section>
+
+      {/* Avis */}
+      <section className="px-5 sm:px-8 py-8 max-w-3xl mx-auto" data-testid="landing-reviews">
+        <div className="rf-label mb-2">Avis des conducteurs</div>
+
+        <h2 className="font-display text-3xl sm:text-4xl tracking-tight">
+          Ce que pensent les utilisateurs
+        </h2>
+
+        <div className="rf-card p-6 mt-5 border border-rf-blue/20 bg-rf-blue/5">
+          <div className="flex items-center gap-3">
+            <div className="text-3xl" aria-label="5 étoiles">⭐⭐⭐⭐⭐</div>
+
+            <div>
+              <div className="font-display text-3xl">
+                5.0 / 5
+              </div>
+              <div className="text-rf-muted text-sm">
+                Basé sur 0 avis pour le moment
+              </div>
+            </div>
+          </div>
+
+          <p className="text-rf-muted mt-4">
+            Les évaluations des conducteurs apparaîtront ici automatiquement
+            lorsque les premiers avis seront ajoutés.
+          </p>
+        </div>
       </section>
 
       {/* Bottom CTA */}
