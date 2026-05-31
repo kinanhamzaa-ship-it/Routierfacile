@@ -1,8 +1,30 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { ArrowLeft, Trash, Warning } from "@phosphor-icons/react";
+import {
+  ArrowLeft,
+  Trash,
+  Warning,
+  SignOut,
+  UserCircle,
+  Crown,
+  Lifebuoy,
+  Database,
+  Info,
+} from "@phosphor-icons/react";
 import { toast } from "sonner";
+
+function getPlanLabel(plan) {
+  if (plan === "admin") return "Admin";
+  if (plan === "premium") return "Premium";
+  return "Gratuit";
+}
+
+function getPlanBadgeClass(plan) {
+  if (plan === "admin") return "bg-rf-blue/20 text-rf-blue";
+  if (plan === "premium") return "bg-rf-green/20 text-rf-green";
+  return "bg-rf-muted/15 text-rf-muted";
+}
 
 export default function Account() {
   const { user, logout, deleteAccount } = useAuth();
@@ -12,16 +34,22 @@ export default function Account() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  const plan = user?.plan || "free";
+  const planLabel = getPlanLabel(plan);
+
   const handleDelete = async (e) => {
     e.preventDefault();
     setError("");
+
     if (!password) {
       setError("Veuillez saisir votre mot de passe pour confirmer.");
       return;
     }
+
     setSubmitting(true);
     const r = await deleteAccount(password);
     setSubmitting(false);
+
     if (r.ok) {
       toast.success("Votre compte a été supprimé.");
       nav("/login", { replace: true });
@@ -49,13 +77,108 @@ export default function Account() {
 
       <section className="px-4 mt-4">
         <div className="rf-card p-4">
-          <div className="rf-label">Connecté en tant que</div>
-          <div className="font-display text-2xl mt-1" data-testid="account-email">
-            {user?.email}
+          <div className="flex items-start gap-3">
+            <UserCircle size={34} weight="duotone" className="text-rf-blue shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <div className="rf-label">Connecté en tant que</div>
+              <div className="font-display text-2xl mt-1 break-words" data-testid="account-email">
+                {user?.email || "—"}
+              </div>
+              {user?.name && (
+                <div className="text-rf-muted text-sm mt-1">{user.name}</div>
+              )}
+            </div>
           </div>
-          {user?.name && (
-            <div className="text-rf-muted text-sm mt-1">{user.name}</div>
-          )}
+        </div>
+      </section>
+
+      <section className="px-4 mt-4">
+        <div className="rf-card p-4">
+          <div className="flex items-start gap-3">
+            <Crown size={28} weight="duotone" className="text-rf-orange shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="rf-label">Plan actuel</div>
+              <div className="flex items-center justify-between gap-3 mt-2">
+                <div>
+                  <div className="font-display text-2xl">{planLabel}</div>
+                  <div className="text-rf-muted text-sm mt-1">
+                    Les options Premium seront ajoutées progressivement.
+                  </div>
+                </div>
+                <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPlanBadgeClass(plan)}`}>
+                  {planLabel}
+                </span>
+              </div>
+
+              {plan === "free" && (
+                <div className="mt-4 rounded-xl border border-rf-border bg-rf-elevated/40 p-3">
+                  <div className="text-sm font-medium">Premium bientôt disponible</div>
+                  <div className="text-rf-muted text-xs mt-1">
+                    Historique illimité, sauvegarde, alertes avancées et support prioritaire.
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="px-4 mt-4">
+        <div className="rf-card p-4">
+          <div className="flex items-start gap-3">
+            <Database size={28} weight="duotone" className="text-rf-blue shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="rf-label">Sauvegarde</div>
+              <p className="text-rf-muted text-sm mt-2">
+                La sauvegarde et la restauration des données seront ajoutées dans une prochaine étape.
+              </p>
+              <div className="grid grid-cols-1 gap-2 mt-4">
+                <button type="button" className="rf-btn-ghost w-full opacity-60 cursor-not-allowed" disabled>
+                  Exporter mes données
+                </button>
+                <button type="button" className="rf-btn-ghost w-full opacity-60 cursor-not-allowed" disabled>
+                  Importer une sauvegarde
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="px-4 mt-4">
+        <div className="rf-card p-4">
+          <div className="flex items-start gap-3">
+            <Lifebuoy size={28} weight="duotone" className="text-rf-green shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="rf-label">Support</div>
+              <p className="text-rf-muted text-sm mt-2">
+                Besoin d’aide ou envie de signaler un problème ?
+              </p>
+              <a
+                href="mailto:kinan.hamzaa@gmail.com?subject=Support%20Routier%20Facile"
+                className="rf-btn-ghost w-full mt-4 flex items-center justify-center"
+              >
+                Contacter le support
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="px-4 mt-4">
+        <div className="rf-card p-4">
+          <div className="flex items-start gap-3">
+            <Info size={28} weight="duotone" className="text-rf-muted shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="rf-label">À propos</div>
+              <div className="font-display text-xl mt-1">Routier Facile</div>
+              <div className="text-rf-muted text-sm mt-1">Version 1.0</div>
+              <p className="text-rf-muted text-xs mt-3">
+                Application pensée pour aider les conducteurs routiers à suivre leurs journées,
+                leurs repos et leurs alertes de conformité.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -63,13 +186,14 @@ export default function Account() {
         <button
           data-testid="logout-action"
           onClick={() => logout()}
-          className="rf-btn-ghost w-full text-left"
+          className="rf-btn-ghost w-full flex items-center justify-center gap-2"
         >
+          <SignOut size={18} />
           Se déconnecter
         </button>
       </section>
 
-      <section className="px-4 mt-10">
+      <section className="px-4 mt-10 pb-8">
         <div className="rf-label text-rf-red mb-2">Zone dangereuse</div>
         <div className="rf-card border border-rf-red/30 bg-rf-red/5 p-4">
           <div className="flex items-start gap-3">
