@@ -435,6 +435,13 @@ class DeleteAccountIn(BaseModel):
     password: str
 
 
+PlanType = Literal["free", "premium", "admin"]
+
+
+class AdminUpdatePlanIn(BaseModel):
+    plan: PlanType
+
+
 MealStatus = Literal["yes", "no", "unsure"]
 
 
@@ -589,6 +596,17 @@ async def get_current_user(request: Request) -> dict:
     if not user:
         raise HTTPException(status_code=401, detail="Utilisateur introuvable")
     user.pop("password_hash", None)
+    user["plan"] = user.get("plan", "free")
+    return user
+
+
+def is_admin_user(user: dict) -> bool:
+    return user.get("role") == "admin" or user.get("plan") == "admin"
+
+
+async def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Accès admin requis")
     return user
 
 
@@ -1132,6 +1150,93 @@ async def me(user: dict = Depends(get_current_user)):
     }
 
 
+
+# ============================================================
+# Admin endpoints
+@api_router.get("/admin/stats")
+async def admin_stats(admin: dict = Depends(require_admin)):
+    users_count = await db.users.count_documents({})
+    verified_users = await db.users.count_documents({"email_verified": True})
+    free_users = await db.users.count_documents({"plan": "free"})
+    premium_users = await db.users.count_documents({"plan": "premium"})
+    admin_users = await db.users.count_documents({"plan": "admin"})
+    entries_count = await db.entries.count_documents({})
+    cycles_count = await db.cycles.count_documents({})
+
+    latest_users = await db.users.find(
+        {},
+        {"_id": 0, "password_hash": 0},
+    ).sort("created_at", -1).limit(5).to_list(length=5)
+
+    return {
+        "users_count": users_count,
+        "verified_users": verified_users,
+        "free_users": free_users,
+        "premium_users": premium_users,
+        "admin_users": admin_users,
+        "entries_count": entries_count,
+        "cycles_count": cycles_count,
+        "latest_users": latest_users,
+    }
+
+
+@api_router.get("/admin/users")
+async def admin_list_users(
+    q: Optional[str] = None,
+    limit: int = 50,
+    admin: dict = Depends(require_admin),
+):
+    query = {}
+    if q:
+        query = {
+            "$or": [
+                {"email": {"$regex": q, "$options": "i"}},
+                {"name": {"$regex": q, "$options": "i"}},
+            ]
+        }
+
+    limit = max(1, min(limit, 200))
+    users = await db.users.find(
+        query,
+        {"_id": 0, "password_hash": 0},
+    ).sort("created_at", -1).limit(limit).to_list(length=limit)
+
+    for u in users:
+        u["plan"] = u.get("plan", "free")
+        u["entries_count"] = await db.entries.count_documents({"user_id": u["id"]})
+
+    return users
+
+
+@api_router.patch("/admin/users/{user_id}/plan")
+async def admin_update_user_plan(
+    user_id: str,
+    payload: AdminUpdatePlanIn,
+    admin: dict = Depends(require_admin),
+):
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    update = {
+        "plan": payload.plan,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if payload.plan == "admin":
+        update["role"] = "admin"
+    elif user.get("role") == "admin":
+        update["role"] = "driver"
+
+    await db.users.update_one({"id": user_id}, {"$set": update})
+    updated = await db.users.find_one(
+        {"id": user_id},
+        {"_id": 0, "password_hash": 0},
+    )
+    updated["plan"] = updated.get("plan", "free")
+    return updated
+
+
 # ============================================================
 # Detection
 @api_router.post("/cycles/detect-rest")
@@ -1565,6 +1670,17 @@ async def startup():
         {"plan": {"$exists": False}},
         {"$set": {"plan": "free"}},
     )
+
+    owner_emails = os.environ.get(
+        "OWNER_EMAILS",
+        "kinan.hamzaa@gmail.com,kinan.hamza1992@gmail.com",
+    )
+    owner_emails = [e.strip().lower() for e in owner_emails.split(",") if e.strip()]
+    if owner_emails:
+        await db.users.update_many(
+            {"email": {"$in": owner_emails}},
+            {"$set": {"role": "admin", "plan": "admin"}},
+        )
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@routier-facile.fr")
     admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")
     existing = await db.users.find_one({"email": admin_email})
