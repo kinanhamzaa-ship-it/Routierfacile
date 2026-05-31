@@ -127,10 +127,10 @@ function CardReminderModal({ onClose }) {
         className="rf-card max-w-sm w-full p-6 text-center"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="text-4xl mb-3">💳</div>
-        <div className="rf-label text-rf-blue">Rappel</div>
+        <div className="text-4xl mb-3">🪪</div>
+        <div className="rf-label text-rf-blue">FIN DE JOURNÉE</div>
         <h2 className="font-display text-2xl mt-2">
-          Pensez à retirer votre carte
+          N&apos;oubliez pas votre carte conducteur.
         </h2>
         <p className="text-sm text-rf-muted mt-3">
           Bon repos.
