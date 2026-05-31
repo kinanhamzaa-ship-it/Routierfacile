@@ -205,7 +205,7 @@ export default function Account() {
                 Besoin d’aide ou envie de signaler un problème ?
               </p>
               <a
-                href="mailto:kinan.hamzaa@gmail.com?subject=Support%20Routier%20Facile"
+                href="mailto:contact@routierfacile.com?subject=Support%20Routier%20Facile"
                 className="rf-btn-ghost w-full mt-4 flex items-center justify-center"
               >
                 Contacter le support
