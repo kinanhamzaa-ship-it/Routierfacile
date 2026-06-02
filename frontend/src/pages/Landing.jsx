@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import api from "../lib/api";
 import {
   Truck, Clock, Coffee, Bed, ListBullets, FilePdf, DeviceMobile, ArrowRight, CheckCircle,
 } from "@phosphor-icons/react";
@@ -19,6 +21,21 @@ const FEATURES = [
 ];
 
 export default function Landing() {
+  const [reviewStats, setReviewStats] = useState(null);
+
+  useEffect(() => {
+    loadReviewStats();
+  }, []);
+
+  async function loadReviewStats() {
+    try {
+      const response = await api.get("/reviews/stats");
+      setReviewStats(response.data);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   return (
     <div data-testid="landing-page" className="rf-app-min-h-screen rf-safe-top rf-grain">
       {/* Hero */}
@@ -152,22 +169,29 @@ export default function Landing() {
         </h2>
 
         <div className="rf-card p-6 mt-5 border border-rf-blue/20 bg-rf-blue/5">
-          <div className="flex items-center gap-3">
-            <div className="text-3xl" aria-label="5 étoiles">⭐⭐⭐⭐⭐</div>
-
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <div className="font-display text-3xl">
-                5.0 / 5
+              <div className="text-3xl" aria-label="5 étoiles">⭐⭐⭐⭐⭐</div>
+
+              <div className="font-display text-3xl mt-2">
+                {reviewStats?.average_display || "5.0"} / 5
               </div>
+
               <div className="text-rf-muted text-sm">
-                Basé sur 0 avis pour le moment
+                Basé sur {reviewStats?.count || 0} avis
               </div>
             </div>
+
+            <Link
+              to="/avis"
+              className="rf-btn-primary"
+            >
+              Voir tous les avis
+            </Link>
           </div>
 
           <p className="text-rf-muted mt-4">
-            Les évaluations des conducteurs apparaîtront ici automatiquement
-            lorsque les premiers avis seront ajoutés.
+            Découvrez les retours des conducteurs utilisant Routier Facile au quotidien.
           </p>
         </div>
       </section>
