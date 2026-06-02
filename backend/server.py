@@ -1245,6 +1245,52 @@ async def admin_update_user_plan(
 
 
 # ============================================================
+# Admin reviews endpoints
+@api_router.get("/admin/reviews/pending")
+async def admin_pending_reviews(admin: dict = Depends(require_admin)):
+    reviews = await db.reviews.find(
+        {"approved": False},
+        {"_id": 0, "fingerprint": 0},
+    ).sort("updated_at", -1).to_list(length=100)
+
+    return reviews
+
+
+@api_router.patch("/admin/reviews/{review_id}/approve")
+async def admin_approve_review(
+    review_id: str,
+    admin: dict = Depends(require_admin),
+):
+    review = await db.reviews.find_one({"id": review_id}, {"_id": 0})
+    if not review:
+        raise HTTPException(status_code=404, detail="Avis introuvable")
+
+    await db.reviews.update_one(
+        {"id": review_id},
+        {"$set": {
+            "approved": True,
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+
+    return {"ok": True}
+
+
+@api_router.delete("/admin/reviews/{review_id}")
+async def admin_delete_review(
+    review_id: str,
+    admin: dict = Depends(require_admin),
+):
+    review = await db.reviews.find_one({"id": review_id}, {"_id": 0})
+    if not review:
+        raise HTTPException(status_code=404, detail="Avis introuvable")
+
+    await db.reviews.delete_one({"id": review_id})
+
+    return {"ok": True}
+
+
+# ============================================================
 # Public reviews endpoints
 @api_router.post("/reviews")
 async def create_review(payload: ReviewIn, request: Request):
@@ -1269,7 +1315,7 @@ async def create_review(payload: ReviewIn, request: Request):
         "name": clean_name or "Conducteur",
         "comment": clean_comment,
         "fingerprint": fingerprint,
-        "approved": True,
+        "approved": False,
         "created_at": now,
         "updated_at": now,
     }
@@ -1282,7 +1328,7 @@ async def create_review(payload: ReviewIn, request: Request):
                 "rating": payload.rating,
                 "name": clean_name or existing.get("name") or "Conducteur",
                 "comment": clean_comment,
-                "approved": True,
+                "approved": False,
                 "updated_at": now,
             }},
         )
