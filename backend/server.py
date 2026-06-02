@@ -1250,7 +1250,7 @@ async def admin_update_user_plan(
 async def admin_pending_reviews(admin: dict = Depends(require_admin)):
     reviews = await db.reviews.find(
         {"approved": False},
-        {"_id": 0, "fingerprint": 0},
+        {"_id": 0, "fingerprint": 0, "user_id": 0},
     ).sort("updated_at", -1).to_list(length=100)
 
     return reviews
@@ -1293,34 +1293,20 @@ async def admin_delete_review(
 # ============================================================
 # Public reviews endpoints
 @api_router.post("/reviews")
-async def create_review(payload: ReviewIn, request: Request):
-    """Public review submission.
+async def create_review(payload: ReviewIn, user: dict = Depends(get_current_user)):
+    """Authenticated review submission.
 
-    One browser/IP can update its latest review instead of creating unlimited
-    duplicate reviews. This keeps the public average useful while still allowing
-    a driver to correct their rating later.
+    One account = one review. If the same user submits again, the existing
+    review is updated instead of creating a duplicate. Every new or updated
+    review goes back to moderation before becoming public.
     """
     now = datetime.now(timezone.utc).isoformat()
-    client_host = request.client.host if request.client else "unknown"
-    user_agent = request.headers.get("User-Agent", "")[:200]
-    fingerprint_raw = f"{client_host}|{user_agent}"
-    fingerprint = hashlib.sha256(fingerprint_raw.encode("utf-8")).hexdigest()
 
-    clean_name = (payload.name or "").strip()[:80]
+    clean_name = (payload.name or user.get("name") or user.get("email") or "").strip()[:80]
     clean_comment = (payload.comment or "").strip()[:500]
 
-    doc = {
-        "id": str(uuid.uuid4()),
-        "rating": payload.rating,
-        "name": clean_name or "Conducteur",
-        "comment": clean_comment,
-        "fingerprint": fingerprint,
-        "approved": False,
-        "created_at": now,
-        "updated_at": now,
-    }
+    existing = await db.reviews.find_one({"user_id": user["id"]}, {"_id": 0})
 
-    existing = await db.reviews.find_one({"fingerprint": fingerprint}, {"_id": 0})
     if existing:
         await db.reviews.update_one(
             {"id": existing["id"]},
@@ -1332,11 +1318,25 @@ async def create_review(payload: ReviewIn, request: Request):
                 "updated_at": now,
             }},
         )
-        updated = await db.reviews.find_one({"id": existing["id"]}, {"_id": 0, "fingerprint": 0})
+        updated = await db.reviews.find_one(
+            {"id": existing["id"]},
+            {"_id": 0, "fingerprint": 0, "user_id": 0},
+        )
         return updated
 
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "rating": payload.rating,
+        "name": clean_name or "Conducteur",
+        "comment": clean_comment,
+        "approved": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+
     await db.reviews.insert_one(dict(doc))
-    doc.pop("fingerprint", None)
+    doc.pop("user_id", None)
     return doc
 
 
@@ -1374,7 +1374,7 @@ async def list_reviews(limit: int = 6):
     limit = max(1, min(limit, 20))
     reviews = await db.reviews.find(
         {"approved": True},
-        {"_id": 0, "fingerprint": 0},
+        {"_id": 0, "fingerprint": 0, "user_id": 0},
     ).sort("updated_at", -1).limit(limit).to_list(length=limit)
 
     return reviews
@@ -1804,6 +1804,7 @@ async def startup():
     await db.password_reset_tokens.create_index("user_id")
     await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
     await db.reviews.create_index("fingerprint", unique=True)
+    await db.reviews.create_index("user_id", unique=True)
     await db.reviews.create_index([("approved", 1), ("updated_at", -1)])
     # Backfill: any existing user without the email_verified field gets False.
     # Existing accounts must verify before logging in again.
