@@ -16,6 +16,7 @@ import History from "./pages/History";
 import Monthly from "./pages/Monthly";
 import Landing from "./pages/Landing";
 import Admin from "./pages/Admin";
+import Reviews from "./pages/Reviews";
 import BottomNav from "./components/BottomNav";
 import { Toaster } from "./components/ui/sonner";
 
@@ -117,6 +118,14 @@ function Router() {
         <Admin />
       </Shell>
     </Protected>
+  }
+/>
+      <Route
+  path="/avis"
+  element={
+    <Shell>
+      <Reviews />
+    </Shell>
   }
 />
       <Route path="*" element={<Navigate to="/" replace />} />
