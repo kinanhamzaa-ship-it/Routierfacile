@@ -6,6 +6,7 @@ export default function Admin() {
   const [users, setUsers] = useState([]);
   const [successMessage, setSuccessMessage] = useState("");
   const [search, setSearch] = useState("");
+  const [pendingReviews, setPendingReviews] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -14,9 +15,11 @@ export default function Admin() {
   async function loadData() {
     const statsRes = await api.get("/admin/stats");
     const usersRes = await api.get("/admin/users");
+    const reviewsRes = await api.get("/admin/reviews/pending");
 
     setStats(statsRes.data);
     setUsers(usersRes.data);
+    setPendingReviews(reviewsRes.data || []);
   }
 
   async function changePlan(userId, plan) {
@@ -24,6 +27,41 @@ export default function Admin() {
       await api.patch(`/admin/users/${userId}/plan`, { plan });
 
       setSuccessMessage(`✓ Plan changé vers ${plan}`);
+
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 2500);
+
+      loadData();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function approveReview(reviewId) {
+    try {
+      await api.patch(`/admin/reviews/${reviewId}/approve`);
+
+      setSuccessMessage("✓ Avis approuvé");
+
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 2500);
+
+      loadData();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function deleteReview(reviewId) {
+    const ok = window.confirm("Supprimer définitivement cet avis ?");
+    if (!ok) return;
+
+    try {
+      await api.delete(`/admin/reviews/${reviewId}`);
+
+      setSuccessMessage("✓ Avis supprimé");
 
       setTimeout(() => {
         setSuccessMessage("");
@@ -65,10 +103,65 @@ export default function Admin() {
       </div>
 
       <div className="rf-card p-4 mt-4">
-        <div className="rf-label">Répartition des plans</div>
-        <div className="mt-2">Free : {stats.free_users}</div>
-        <div>Premium : {stats.premium_users}</div>
-        <div>Admin : {stats.admin_users}</div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="rf-label">Avis en attente</div>
+          <span className="px-2 py-1 rounded-full text-xs bg-rf-orange/20 text-rf-orange">
+            {pendingReviews.length}
+          </span>
+        </div>
+
+        {pendingReviews.length === 0 ? (
+          <div className="text-sm text-rf-muted mt-3">
+            Aucun avis en attente.
+          </div>
+        ) : (
+          <div className="mt-3 space-y-3">
+            {pendingReviews.map((review) => (
+              <div
+                key={review.id}
+                className="rounded-xl border border-white/10 bg-white/5 p-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-medium">
+                      {review.name || "Conducteur"}
+                    </div>
+                    <div className="text-rf-orange text-sm mt-1">
+                      {"★".repeat(review.rating || 0)}
+                      {"☆".repeat(5 - (review.rating || 0))}
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-rf-muted">
+                    En attente
+                  </div>
+                </div>
+
+                {review.comment && (
+                  <p className="text-sm text-rf-muted mt-3">
+                    {review.comment}
+                  </p>
+                )}
+
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={() => approveReview(review.id)}
+                    className="px-3 py-2 rounded-lg text-sm bg-green-500/20 text-green-400 border border-green-500/30"
+                  >
+                    Approuver
+                  </button>
+
+                  <button
+                    onClick={() => deleteReview(review.id)}
+                    className="px-3 py-2 rounded-lg text-sm bg-rf-red/10 text-rf-red border border-rf-red/30"
+                  >
+                    Supprimer
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="rf-card p-4 mt-4">
