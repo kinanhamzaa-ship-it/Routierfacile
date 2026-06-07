@@ -227,8 +227,31 @@ export default function Landing() {
       </section>
 
       <footer className="px-5 sm:px-8 py-6 max-w-3xl mx-auto text-center text-xs text-rf-muted rf-safe-bottom">
-        © {new Date().getFullYear()} Routier Facile — conçu en France pour les conducteurs européens.
-      </footer>
+  <div className="flex flex-wrap justify-center gap-4 mb-3">
+    <Link to="/about" className="hover:text-white">
+      À propos
+    </Link>
+
+    <Link to="/terms" className="hover:text-white">
+      Conditions d'utilisation
+    </Link>
+
+    <Link to="/privacy" className="hover:text-white">
+      Politique de confidentialité
+    </Link>
+
+    <a
+      href="mailto:contact@routierfacile.com"
+      className="hover:text-white"
+    >
+      Contact
+    </a>
+  </div>
+
+  <div>
+    © {new Date().getFullYear()} Routier Facile — conçu en France pour les conducteurs européens.
+  </div>
+</footer>
     </div>
   );
 }
