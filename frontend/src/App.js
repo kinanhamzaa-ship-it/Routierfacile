@@ -123,10 +123,38 @@ function Router() {
     </Protected>
   }
 />
-      <Route path="/avis" element={<Avis />} />
-      <Route path="/about" element={<About />} />
-      <Route path="/terms" element={<Terms />} />
-      <Route path="/privacy" element={<Privacy />} />
+      <Route
+  path="/avis"
+  element={
+    <Shell>
+      <Reviews />
+    </Shell>
+  }
+/>
+<Route
+  path="/about"
+  element={
+    <Shell>
+      <About />
+    </Shell>
+  }
+/>
+      <Route
+  path="/terms"
+  element={
+    <Shell>
+      <Terms />
+    </Shell>
+  }
+/>
+      <Route
+  path="/privacy"
+  element={
+    <Shell>
+      <Privacy />
+    </Shell>
+  }
+/>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
