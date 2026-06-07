@@ -38,8 +38,5 @@ return ( <div className="max-w-3xl mx-auto px-5 py-8"> <h1 className="font-displ
       Aujourd'hui, Routier Facile continue d'évoluer grâce aux retours des conducteurs qui l'utilisent au quotidien. Chaque suggestion et chaque remarque contribuent à améliorer l'application afin qu'elle réponde au mieux aux réalités du terrain.
     </p>
   </div>
-</div>
-```
-
-);
+  );
 }
