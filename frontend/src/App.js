@@ -60,6 +60,16 @@ function Shell({ children }) {
   );
 }
 
+function PublicShell({ children }) {
+  return (
+    <div className="rf-app-min-h rf-grain rf-safe-top">
+      <div className="max-w-md mx-auto relative z-10 px-0">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function Router() {
   useEffect(() => {
     document.documentElement.classList.add("dark");
