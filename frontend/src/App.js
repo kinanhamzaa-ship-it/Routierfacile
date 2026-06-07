@@ -113,16 +113,8 @@ function Router() {
           </Protected>
         }
       />
-       <Route
-  path="/admin"
-  element={
-    <Protected>
-      <Shell>
-        <Admin />
-      </Shell>
-    </Protected>
-  }
-/>
+      <Route path="/admin" element={<Admin />} />
+        
       <Route path="/avis" element={<Reviews />} />
 
       <Route path="/about" element={<About />} />
