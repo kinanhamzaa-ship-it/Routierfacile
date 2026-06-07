@@ -17,6 +17,9 @@ import Monthly from "./pages/Monthly";
 import Landing from "./pages/Landing";
 import Admin from "./pages/Admin";
 import Reviews from "./pages/Reviews";
+import About from "./pages/About";
+import Terms from "./pages/Terms";
+import Privacy from "./pages/Privacy";
 import BottomNav from "./components/BottomNav";
 import { Toaster } from "./components/ui/sonner";
 
@@ -125,6 +128,30 @@ function Router() {
   element={
     <Shell>
       <Reviews />
+    </Shell>
+  }
+/>
+<Route
+  path="/about"
+  element={
+    <Shell>
+      <About />
+    </Shell>
+  }
+/>
+      <Route
+  path="/terms"
+  element={
+    <Shell>
+      <Terms />
+    </Shell>
+  }
+/>
+      <Route
+  path="/privacy"
+  element={
+    <Shell>
+      <Privacy />
     </Shell>
   }
 />
